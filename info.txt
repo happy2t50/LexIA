@@ -1,0 +1,5 @@
+hacer un firebase hosting, asi mismo en paypes(creo ) Al desplegar el la app debe estar 100 funcional
+
+percep ( latencia es de que se duerme)
+
+en las conclusiones se debe agregar en un mismo servicio o dejarlo separado y debe justificarse si 

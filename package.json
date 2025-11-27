@@ -1,0 +1,52 @@
+{
+  "name": "lexia-2.0",
+  "version": "2.0.0",
+  "description": "Sistema de Asistencia Legal con Machine Learning y Microservicios",
+  "main": "index.js",
+  "scripts": {
+    "install:all": "npm run install:olap && npm run install:clustering && npm run install:auth && npm run install:nlp && npm run install:search && npm run install:recommendations && npm run install:explanation && npm run install:geo",
+    "install:olap": "cd microservices/olap-cube && npm install",
+    "install:clustering": "cd microservices/clustering-ml && npm install",
+    "install:auth": "cd microservices/auth && npm install",
+    "install:nlp": "cd microservices/nlp && npm install",
+    "install:search": "cd microservices/search && npm install",
+    "install:recommendations": "cd microservices/recommendations && npm install",
+    "install:explanation": "cd microservices/explanation && npm install",
+    "install:geo": "cd microservices/geo-assistance && npm install",
+    "build:all": "npm run build:olap && npm run build:clustering && npm run build:auth && npm run build:nlp && npm run build:search && npm run build:recommendations && npm run build:explanation && npm run build:geo",
+    "build:olap": "cd microservices/olap-cube && npm run build",
+    "build:clustering": "cd microservices/clustering-ml && npm run build",
+    "build:auth": "cd microservices/auth && npm run build",
+    "build:nlp": "cd microservices/nlp && npm run build",
+    "build:search": "cd microservices/search && npm run build",
+    "build:recommendations": "cd microservices/recommendations && npm run build",
+    "build:explanation": "cd microservices/explanation && npm run build",
+    "build:geo": "cd microservices/geo-assistance && npm run build",
+    "dev:olap": "cd microservices/olap-cube && npm run dev",
+    "dev:clustering": "cd microservices/clustering-ml && npm run dev",
+    "dev:auth": "cd microservices/auth && npm run dev",
+    "dev:nlp": "cd microservices/nlp && npm run dev",
+    "dev:search": "cd microservices/search && npm run dev",
+    "dev:recommendations": "cd microservices/recommendations && npm run dev",
+    "dev:explanation": "cd microservices/explanation && npm run dev",
+    "dev:geo": "cd microservices/geo-assistance && npm run dev",
+    "generate:dataset": "cd dataset && npm install && npm run generate",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "health:check": "node scripts/health-check.js"
+  },
+  "keywords": [
+    "legal-assistance",
+    "machine-learning",
+    "microservices",
+    "nlp",
+    "clustering",
+    "olap"
+  ],
+  "author": "LexIA Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

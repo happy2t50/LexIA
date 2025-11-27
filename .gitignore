@@ -1,0 +1,80 @@
+# Claude AI
+.claude/
+
+# Dependencies
+node_modules/
+*/node_modules/
+package-lock.json
+*/package-lock.json
+
+# Build outputs
+dist/
+*/dist/
+build/
+*/build/
+
+# Environment variables
+.env
+.env.local
+.env.production
+*/.env
+*/.env.local
+*.env
+credentials/
+secrets/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+coverage/
+.nyc_output/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Dataset (opcional, descomenta si no quieres versionar)
+# dataset/training_dataset.csv
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+nul
+
+# Database files (desarrollo)
+*.sqlite
+*.db
+*.db-journal
+
+# Model files (pueden ser grandes)
+models/*.pkl
+models/*.h5
+models/*.pt
+
+# Python (si se usa para ML)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/

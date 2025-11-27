@@ -1,0 +1,216 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database con pgvector
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: lexia-postgres
+    environment:
+      POSTGRES_DB: lexia_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: lexia_password_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lexia-network
+
+  # Auth Service
+  auth:
+    build:
+      context: ./microservices/auth
+      dockerfile: Dockerfile
+    container_name: lexia-auth
+    environment:
+      PORT: 3003
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+      JWT_SECRET: lexia_jwt_secret_change_in_production
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
+  # OLAP Cube Service
+  olap-cube:
+    build:
+      context: ./microservices/IA/olap-cube
+      dockerfile: Dockerfile
+    container_name: lexia-olap
+    environment:
+      PORT: 3001
+      USE_POSTGRESQL: "true"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+      DB_POOL_MAX: 20
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
+  # Clustering ML Service
+  clustering:
+    build:
+      context: ./microservices/IA/clustering-ml
+      dockerfile: Dockerfile
+    container_name: lexia-clustering
+    environment:
+      PORT: 3002
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
+  # NLP Service
+  nlp:
+    build:
+      context: ./microservices/IA/nlp
+      dockerfile: Dockerfile
+    container_name: lexia-nlp
+    environment:
+      PORT: 3004
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+    ports:
+      - "3004:3004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
+  # RAG Service
+  rag:
+    build:
+      context: ./microservices/IA/rag
+      dockerfile: Dockerfile
+    container_name: lexia-rag
+    environment:
+      PORT: 3009
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+      EMBEDDING_MODEL: Xenova/all-MiniLM-L6-v2
+      CLUSTERING_SERVICE_URL: http://clustering:3002
+      SIMILARITY_THRESHOLD: "0.5"
+      TOP_K_RESULTS: "5"
+    ports:
+      - "3009:3009"
+    volumes:
+      - rag_models:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clustering:
+        condition: service_started
+    networks:
+      - lexia-network
+    restart: unless-stopped
+    # Más memoria para el modelo de embeddings
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # Chat Service (CORE)
+  chat:
+    build:
+      context: ./microservices/chat
+      dockerfile: Dockerfile
+    container_name: lexia-chat
+    environment:
+      PORT: 3010
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: lexia_db
+      DB_USER: postgres
+      DB_PASSWORD: lexia_password_2024
+      DB_POOL_MAX: 20
+      RAG_SERVICE_URL: http://rag:3009
+      NLP_SERVICE_URL: http://nlp:3004
+      CLUSTERING_SERVICE_URL: http://clustering:3002
+      AUTO_GROUP_USERS: "true"
+    ports:
+      - "3010:3010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+      nlp:
+        condition: service_started
+      clustering:
+        condition: service_started
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
+  # Nginx API Gateway (Reverse Proxy)
+  nginx:
+    image: nginx:alpine
+    container_name: lexia-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth
+      - olap-cube
+      - clustering
+      - nlp
+      - rag
+      - chat
+    networks:
+      - lexia-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 80 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  rag_models:
+    driver: local
+
+networks:
+  lexia-network:
+    driver: bridge
