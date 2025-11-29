@@ -104,32 +104,45 @@ PostgreSQL Auth    OLAP    Clustering NLP   RAG   Chat
 
 Toda la documentación está organizada en la carpeta [`readme/`](readme/):
 
-### Guías de Inicio
+### 🚀 Guías de Inicio
+- [**INICIO_RAPIDO.md**](readme/INICIO_RAPIDO.md) - ⭐ Guía completa de inicio rápido (15-20 min)
 - [**QUICK_START.md**](readme/QUICK_START.md) - Guía rápida de inicio
 - [**DOCKER_GUIDE.md**](readme/DOCKER_GUIDE.md) - Guía completa de Docker
 - [**INICIAR_DOCKER.md**](readme/INICIAR_DOCKER.md) - Instrucciones para iniciar Docker
 
-### API y Servicios
+### 🔐 Autenticación y Seguridad
+- [**GUIA_CONFIGURACION_AUTH.md**](readme/GUIA_CONFIGURACION_AUTH.md) - ⭐ Configurar OAuth2 Google y Email
+- [**AUTH_SYSTEM_DESIGN.md**](readme/AUTH_SYSTEM_DESIGN.md) - Diseño del sistema de autenticación
+- [**MSTG_COMPLIANCE.md**](readme/MSTG_COMPLIANCE.md) - Cumplimiento de normas MSTG
+- [**MSTG_BACKEND_ACTIVO.md**](readme/MSTG_BACKEND_ACTIVO.md) - ⭐ Normas MSTG activas en backend
+
+### 📚 API y Servicios
 - [**API_GATEWAY.md**](readme/API_GATEWAY.md) - Documentación del API Gateway (Nginx)
 - [**CHAT_SERVICE_COMPLETO.md**](readme/CHAT_SERVICE_COMPLETO.md) - Servicio de Chat
 - [**POSTGRESQL_INTEGRATION_SUMMARY.md**](readme/POSTGRESQL_INTEGRATION_SUMMARY.md) - Integración PostgreSQL
+- [**PDF_PROCESSING_FLOW.md**](readme/PDF_PROCESSING_FLOW.md) - Procesamiento de PDFs de leyes
 
-### Arquitectura
+### 🏗️ Arquitectura
 - [**ARCHITECTURE.md**](readme/ARCHITECTURE.md) - Arquitectura general del sistema
 - [**ARQUITECTURA_ACTUALIZADA.md**](readme/ARQUITECTURA_ACTUALIZADA.md) - Arquitectura actualizada
 - [**ARQUITECTURA_CHAT_INTELIGENTE.md**](readme/ARQUITECTURA_CHAT_INTELIGENTE.md) - Chat inteligente
 - [**HEXAGONAL_ARCHITECTURE.md**](readme/HEXAGONAL_ARCHITECTURE.md) - Patrón hexagonal
+- [**GUIA_REPOSITORIOS.md**](readme/GUIA_REPOSITORIOS.md) - ⭐ Estructura de código y repositorios
 
-### Despliegue
+### 🚀 Despliegue
 - [**DEPLOY_COMPLETADO.md**](readme/DEPLOY_COMPLETADO.md) - Resumen del despliegue Docker
 - [**POSTGRESQL_SETUP.md**](readme/POSTGRESQL_SETUP.md) - Configuración de PostgreSQL
 - [**SETUP_POSTGRESQL_RAG.md**](readme/SETUP_POSTGRESQL_RAG.md) - Setup RAG + PostgreSQL
 
-### Implementación
+### 📊 Implementación
 - [**RESUMEN_IMPLEMENTACION.md**](readme/RESUMEN_IMPLEMENTACION.md) - Resumen de implementación
 - [**STATUS_CHAT_INTELIGENTE.md**](readme/STATUS_CHAT_INTELIGENTE.md) - Estado del chat
+- [**SESSION_SUMMARY.md**](readme/SESSION_SUMMARY.md) - Resumen de sesiones
 - [**CLEANUP_PLAN.md**](readme/CLEANUP_PLAN.md) - Plan de limpieza
 - [**RESUMEN_LIMPIEZA.md**](readme/RESUMEN_LIMPIEZA.md) - Resumen de limpieza
+
+### 📑 Índice Completo
+- [**INDEX.md**](readme/INDEX.md) - Índice de toda la documentación
 
 ## Comandos Útiles
 

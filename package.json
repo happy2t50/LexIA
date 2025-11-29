@@ -47,6 +47,7 @@
   "author": "LexIA Team",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^24.10.1",
     "concurrently": "^8.2.2"
   }
 }

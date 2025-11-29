@@ -1,0 +1,35 @@
+# ========================================
+# Dependencias del Microservicio de Transacciones
+# ========================================
+
+# Framework Web
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Base de Datos (ASYNC)
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+
+# Validación de Datos
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Variables de Entorno
+python-dotenv==1.0.0
+
+# Stripe (Pagos - GRATIS modo test)
+stripe==7.4.0
+
+# HTTP Client
+httpx==0.25.1
+requests==2.31.0
+
+# JWT (para verificar tokens de usuarios)
+pyjwt==2.10.1
+
+# Logging
+python-json-logger==2.0.7
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1

@@ -1,189 +1,169 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import { v4 as uuidv4 } from 'uuid';
+import authRoutes from './routes/authRoutes';
+import OAuthService from './services/OAuthService';
+import securityHeaders, { forceHTTPS, validateOrigin } from './middleware/securityHeaders';
+import { requestLogger } from './middleware/sanitizeLogs';
+import { validateSecrets, validateCryptoAlgorithms } from './config/security';
 
+// Cargar variables de entorno
 dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 3003;
-const JWT_SECRET = process.env.JWT_SECRET || 'secret-key-change-in-production';
-
-app.use(cors());
-app.use(express.json());
-
-// Simulación de base de datos de usuarios
-interface User {
-  id: string;
-  email: string;
-  password: string;
-  nombre: string;
-  tipo: 'conductor' | 'peaton' | 'pasajero';
-  createdAt: Date;
+// =====================================================
+// MSTG-CRYPTO-1: Validar que todos los secretos estén configurados
+// =====================================================
+try {
+    validateSecrets();
+    validateCryptoAlgorithms();
+} catch (error: any) {
+    console.error('❌ Error de configuración de seguridad:', error.message);
+    process.exit(1);
 }
 
-const users: User[] = [];
+const app = express();
+const PORT = process.env.PORT || 3008;
 
-// Middleware de autenticación
-export const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+// =====================================================
+// MIDDLEWARES DE SEGURIDAD (ORDEN IMPORTANTE)
+// =====================================================
 
-  if (!token) {
-    return res.status(401).json({ error: 'Token no proporcionado' });
-  }
+// MSTG-ARCH-2: Headers de seguridad HTTP
+app.use(securityHeaders);
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-    if (err) {
-      return res.status(403).json({ error: 'Token inválido' });
-    }
-    (req as any).user = user;
-    next();
-  });
-};
+// MSTG-NETWORK-1: Forzar HTTPS en producción
+if (process.env.NODE_ENV === 'production') {
+    app.use(forceHTTPS);
+}
+
+// MSTG-ARCH-2: Validar origen de peticiones
+const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ['*'];
+app.use(validateOrigin(allowedOrigins));
+
+// CORS con configuración segura
+app.use(cors({
+    origin: (origin, callback) => {
+        // Permitir peticiones sin origin (ej: mobile apps, Postman)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('No permitido por CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['X-Total-Count'],
+    maxAge: 600 // 10 minutos de cache para preflight
+}));
+
+// Body parsers con límite de tamaño (prevenir DoS)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// MSTG-STORAGE-3: Logging seguro (sin información sensible)
+app.use(requestLogger);
+
+// Inicializar Passport para OAuth
+const passport = OAuthService.getPassport();
+app.use(passport.initialize());
+
+// =====================================================
+// RUTAS
+// =====================================================
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'OK', service: 'Auth Service' });
-});
-
-// Registro de usuario
-app.post('/register', async (req: Request, res: Response) => {
-  try {
-    const { email, password, nombre, tipo } = req.body;
-
-    // Validaciones
-    if (!email || !password || !nombre) {
-      return res.status(400).json({ error: 'Email, password y nombre son requeridos' });
-    }
-
-    // Verificar si el usuario ya existe
-    const existingUser = users.find(u => u.email === email);
-    if (existingUser) {
-      return res.status(409).json({ error: 'El usuario ya existe' });
-    }
-
-    // Hash de la contraseña
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Crear usuario
-    const newUser: User = {
-      id: uuidv4(),
-      email,
-      password: hashedPassword,
-      nombre,
-      tipo: tipo || 'conductor',
-      createdAt: new Date()
-    };
-
-    users.push(newUser);
-
-    // Generar token
-    const token = jwt.sign(
-      { id: newUser.id, email: newUser.email, tipo: newUser.tipo },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    res.status(201).json({
-      message: 'Usuario registrado exitosamente',
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        nombre: newUser.nombre,
-        tipo: newUser.tipo
-      },
-      token
-    });
-  } catch (error) {
-    console.error('Error en registro:', error);
-    res.status(500).json({ error: 'Error al registrar usuario' });
-  }
-});
-
-// Login
-app.post('/login', async (req: Request, res: Response) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email y password son requeridos' });
-    }
-
-    // Buscar usuario
-    const user = users.find(u => u.email === email);
-    if (!user) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
-    }
-
-    // Verificar contraseña
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
-    }
-
-    // Generar token
-    const token = jwt.sign(
-      { id: user.id, email: user.email, tipo: user.tipo },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
     res.json({
-      message: 'Login exitoso',
-      user: {
-        id: user.id,
-        email: user.email,
-        nombre: user.nombre,
-        tipo: user.tipo
-      },
-      token
+        status: 'ok',
+        service: 'auth-service',
+        version: '2.0.0',
+        timestamp: new Date().toISOString(),
+        features: {
+            jwt: true,
+            oauth2: !!process.env.GOOGLE_CLIENT_ID,
+            twoFactor: true,
+            emailVerification: !!process.env.SMTP_USER,
+            passwordReset: !!process.env.SMTP_USER
+        }
     });
-  } catch (error) {
-    console.error('Error en login:', error);
-    res.status(500).json({ error: 'Error al hacer login' });
-  }
 });
 
-// Verificar token
-app.post('/verify', authenticateToken, (req: Request, res: Response) => {
-  res.json({
-    valid: true,
-    user: (req as any).user
-  });
-});
+// Rutas de autenticación
+app.use('/', authRoutes);
 
-// Obtener perfil de usuario
-app.get('/profile', authenticateToken, (req: Request, res: Response) => {
-  try {
-    const userId = (req as any).user.id;
-    const user = users.find(u => u.id === userId);
+// =====================================================
+// MANEJO DE ERRORES
+// =====================================================
 
-    if (!user) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-
-    res.json({
-      id: user.id,
-      email: user.email,
-      nombre: user.nombre,
-      tipo: user.tipo,
-      createdAt: user.createdAt
+// Ruta no encontrada
+app.use((req: Request, res: Response) => {
+    res.status(404).json({
+        error: 'Ruta no encontrada',
+        path: req.path,
+        method: req.method
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Error al obtener perfil' });
-  }
 });
 
-// Logout (en un sistema real, se invalidaría el token en una lista negra)
-app.post('/logout', authenticateToken, (req: Request, res: Response) => {
-  res.json({ message: 'Logout exitoso' });
+// Manejo global de errores
+app.use((err: any, req: Request, res: Response, next: any) => {
+    console.error('Error no manejado:', err);
+
+    res.status(err.status || 500).json({
+        error: 'Error interno del servidor',
+        message: process.env.NODE_ENV === 'production' ? 'Ha ocurrido un error' : err.message
+    });
 });
+
+// =====================================================
+// INICIAR SERVIDOR
+// =====================================================
 
 app.listen(PORT, () => {
-  console.log(`🔐 Auth Service corriendo en puerto ${PORT}`);
+    console.log('========================================');
+    console.log('  🔐 Auth Service v2.0');
+    console.log('========================================');
+    console.log(`✅ Servidor corriendo en puerto ${PORT}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log('');
+    console.log('Funcionalidades:');
+    console.log(`  ✅ JWT Authentication (Access + Refresh)`);
+    console.log(`  ${process.env.GOOGLE_CLIENT_ID ? '✅' : '⚠️ '} OAuth2 Google`);
+    console.log(`  ✅ Two-Factor Authentication (TOTP)`);
+    console.log(`  ${process.env.SMTP_USER ? '✅' : '⚠️ '} Email Verification`);
+    console.log(`  ${process.env.SMTP_USER ? '✅' : '⚠️ '} Password Recovery`);
+    console.log(`  ✅ Rate Limiting (via Nginx)`);
+    console.log(`  ✅ Auth Logs & Audit`);
+    console.log('');
+    console.log('Endpoints:');
+    console.log(`  POST   /register`);
+    console.log(`  POST   /login`);
+    console.log(`  POST   /refresh`);
+    console.log(`  POST   /logout`);
+    console.log(`  GET    /me`);
+    console.log(`  POST   /verify-email`);
+    console.log(`  POST   /forgot-password`);
+    console.log(`  POST   /reset-password`);
+    console.log(`  GET    /google`);
+    console.log(`  GET    /google/callback`);
+    console.log(`  POST   /2fa/setup`);
+    console.log(`  POST   /2fa/enable`);
+    console.log(`  POST   /2fa/verify`);
+    console.log(`  GET    /health`);
+    console.log('========================================');
 });
 
-export { authenticateToken };
+// Manejo de señales de terminación
+process.on('SIGTERM', () => {
+    console.log('SIGTERM recibido, cerrando servidor...');
+    process.exit(0);
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT recibido, cerrando servidor...');
+    process.exit(0);
+});
+
+export default app;

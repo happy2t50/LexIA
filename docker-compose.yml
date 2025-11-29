@@ -29,15 +29,41 @@ services:
       dockerfile: Dockerfile
     container_name: lexia-auth
     environment:
-      PORT: 3003
+      PORT: 3008
+      NODE_ENV: production
+
+      # Database
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: lexia_db
-      DB_USER: postgres
+      DB_USER: lexia_user
       DB_PASSWORD: lexia_password_2024
-      JWT_SECRET: lexia_jwt_secret_change_in_production
+
+      # JWT Secrets (CAMBIAR EN PRODUCCIÓN)
+      JWT_ACCESS_SECRET: lexia_jwt_access_secret_2024_change_in_production
+      JWT_REFRESH_SECRET: lexia_jwt_refresh_secret_2024_change_in_production
+      JWT_ACCESS_EXPIRES: 15m
+      JWT_REFRESH_EXPIRES: 7d
+
+      # OAuth2 Google (configurar con tus credenciales)
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      GOOGLE_CALLBACK_URL: http://localhost/api/auth/google/callback
+
+      # Email (SMTP - configurar para producción)
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_SECURE: "false"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+
+      # Frontend URL (para emails y redirects)
+      FRONTEND_URL: http://localhost:3000
+
+      # CORS
+      CORS_ORIGIN: "*"
     ports:
-      - "3003:3003"
+      - "3008:3008"
     depends_on:
       postgres:
         condition: service_healthy
@@ -181,6 +207,40 @@ services:
       - lexia-network
     restart: unless-stopped
 
+  # Transactions Service
+  transactions:
+    build:
+      context: ./microservices/transactions
+      dockerfile: Dockerfile
+    container_name: lexia-transactions
+    environment:
+      PORT: 3005
+      NODE_ENV: production
+
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: lexia_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: lexia_password_2024
+
+      # Stripe (CONFIGURAR CON CREDENCIALES REALES)
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_your_stripe_secret_key}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_your_webhook_secret}
+      STRIPE_PRICE_PRO_MONTHLY: ${STRIPE_PRICE_PRO_MONTHLY:-price_pro_monthly}
+      STRIPE_PRICE_PRO_YEARLY: ${STRIPE_PRICE_PRO_YEARLY:-price_pro_yearly}
+
+      # CORS
+      CORS_ORIGIN: "*"
+    ports:
+      - "3005:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
   # Nginx API Gateway (Reverse Proxy)
   nginx:
     image: nginx:alpine
@@ -196,14 +256,16 @@ services:
       - nlp
       - rag
       - chat
+      - transactions
     networks:
       - lexia-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 80 || exit 1"]
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:80/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 5s
 
 volumes:
   postgres_data:
