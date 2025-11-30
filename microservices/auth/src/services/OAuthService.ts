@@ -1,5 +1,6 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy, Profile, VerifyCallback } from 'passport-google-oauth20';
+import { OAuth2Client } from 'google-auth-library';
 import UserRepository, { CreateUserData } from '../repositories/UserRepository';
 import OAuthRepository from '../repositories/OAuthRepository';
 import AuthLogRepository from '../repositories/AuthLogRepository';
@@ -332,6 +333,155 @@ export class OAuthService {
             linkedAt: acc.created_at,
             profileData: acc.profile_data
         }));
+    }
+
+    /**
+     * Verificar Google ID Token (para apps móviles)
+     * Recibe el ID token de Google Sign-In y retorna los datos del usuario
+     */
+    async verifyGoogleIdToken(idToken: string): Promise<OAuthLoginResult> {
+        const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+        try {
+            // Verificar el token con Google
+            const ticket = await client.verifyIdToken({
+                idToken,
+                audience: GOOGLE_CLIENT_ID,
+            });
+
+            const payload = ticket.getPayload();
+
+            if (!payload || !payload.email || !payload.sub) {
+                throw new Error('Token inválido o datos incompletos');
+            }
+
+            // Extraer datos del payload
+            const googleId = payload.sub;
+            const email = payload.email;
+            const nombre = payload.given_name || 'Usuario';
+            const apellido = payload.family_name || '';
+            const picture = payload.picture;
+
+            // Buscar si ya existe cuenta OAuth vinculada
+            let oauthAccount = await OAuthRepository.findByProvider('google', googleId);
+            let user;
+            let isNewUser = false;
+
+            if (oauthAccount) {
+                // Usuario existente con cuenta Google
+                user = await UserRepository.findById(oauthAccount.usuario_id);
+
+                if (!user) {
+                    throw new Error('Usuario vinculado no encontrado');
+                }
+            } else {
+                // Verificar si existe usuario con ese email
+                user = await UserRepository.findByEmail(email);
+
+                if (user) {
+                    // Usuario existe pero nunca vinculó Google, crear vinculación
+                    await OAuthRepository.upsert({
+                        usuario_id: user.id,
+                        provider: 'google',
+                        provider_account_id: googleId,
+                        access_token: '', // No tenemos access token en este flujo
+                        refresh_token: '',
+                        token_expires_at: new Date(Date.now() + 3600 * 1000),
+                        profile_data: {
+                            name: `${nombre} ${apellido}`,
+                            picture,
+                            email
+                        }
+                    });
+
+                    // Marcar email como verificado (Google ya lo verificó)
+                    if (!user.email_verified) {
+                        await UserRepository.verifyEmail(user.id);
+                    }
+                } else {
+                    // Nuevo usuario, crear cuenta
+                    const userData: CreateUserData = {
+                        email,
+                        nombre,
+                        apellido,
+                        rol: 'user',
+                        account_type: 'google'
+                        // No password_hash para cuentas OAuth
+                    };
+
+                    user = await UserRepository.create(userData);
+
+                    // Marcar email como verificado inmediatamente
+                    await UserRepository.verifyEmail(user.id);
+
+                    // Crear vinculación OAuth
+                    await OAuthRepository.upsert({
+                        usuario_id: user.id,
+                        provider: 'google',
+                        provider_account_id: googleId,
+                        access_token: '',
+                        refresh_token: '',
+                        token_expires_at: new Date(Date.now() + 3600 * 1000),
+                        profile_data: {
+                            name: `${nombre} ${apellido}`,
+                            picture,
+                            email
+                        }
+                    });
+
+                    isNewUser = true;
+
+                    // Log de registro
+                    await AuthLogRepository.create({
+                        usuario_id: user.id,
+                        email: user.email,
+                        event_type: 'oauth_register_mobile',
+                        success: true,
+                        metadata: { provider: 'google', platform: 'mobile' }
+                    });
+                }
+            }
+
+            // Generar JWT tokens
+            const tokenPayload: TokenPayload = {
+                userId: user.id,
+                email: user.email,
+                rol: user.rol,
+                twoFactorEnabled: user.two_factor_enabled
+            };
+
+            const tokens = generateTokens(tokenPayload);
+
+            // Guardar refresh token
+            await RefreshTokenRepository.create({
+                usuario_id: user.id,
+                token: tokens.refreshToken,
+                expires_at: new Date(Date.now() + tokens.refreshTokenExpiresIn * 1000)
+            });
+
+            // Log de login exitoso
+            await AuthLogRepository.create({
+                usuario_id: user.id,
+                email: user.email,
+                event_type: 'oauth_login_mobile',
+                success: true,
+                metadata: { provider: 'google', platform: 'mobile' }
+            });
+
+            // Actualizar último login
+            await UserRepository.resetFailedAttempts(user.id);
+
+            const { password_hash, ...userWithoutPassword } = user;
+
+            return {
+                user: userWithoutPassword,
+                tokens,
+                isNewUser
+            };
+        } catch (error: any) {
+            console.error('Error al verificar Google ID Token:', error);
+            throw new Error('Token de Google inválido o expirado');
+        }
     }
 
     /**

@@ -22,10 +22,13 @@ CREATE TABLE IF NOT EXISTS transacciones (
     -- IDs de Stripe
     stripe_payment_id VARCHAR(255),
     stripe_session_id VARCHAR(255) UNIQUE,
+    stripe_customer_id VARCHAR(255),
+    stripe_subscription_id VARCHAR(255),
 
-    -- Cambios de suscripción
-    suscripcion_anterior INTEGER REFERENCES suscripciones(id),
-    suscripcion_nueva INTEGER REFERENCES suscripciones(id),
+    -- Plan/Tipo de suscripción
+    plan VARCHAR(50), -- 'pro_monthly', 'pro_yearly', etc.
+    rol_anterior INTEGER REFERENCES roles(id),
+    rol_nuevo INTEGER REFERENCES roles(id),
 
     -- Metadata adicional
     metadata JSONB,
@@ -50,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_transacciones_stripe_session
 
 CREATE INDEX IF NOT EXISTS idx_transacciones_stripe_payment
     ON transacciones(stripe_payment_id);
+
+CREATE INDEX IF NOT EXISTS idx_transacciones_stripe_customer
+    ON transacciones(stripe_customer_id);
 
 CREATE INDEX IF NOT EXISTS idx_transacciones_created_at
     ON transacciones(created_at DESC);
@@ -81,8 +87,11 @@ COMMENT ON TABLE transacciones IS 'Registro de transacciones de pagos con Stripe
 COMMENT ON COLUMN transacciones.estado IS 'Estados: pendiente, completado, fallido, reembolsado';
 COMMENT ON COLUMN transacciones.stripe_session_id IS 'ID de sesión de checkout de Stripe';
 COMMENT ON COLUMN transacciones.stripe_payment_id IS 'ID del payment intent de Stripe';
-COMMENT ON COLUMN transacciones.suscripcion_anterior IS 'Suscripción del usuario antes de la transacción';
-COMMENT ON COLUMN transacciones.suscripcion_nueva IS 'Suscripción del usuario después de la transacción';
+COMMENT ON COLUMN transacciones.stripe_customer_id IS 'ID del cliente en Stripe';
+COMMENT ON COLUMN transacciones.stripe_subscription_id IS 'ID de la suscripción en Stripe';
+COMMENT ON COLUMN transacciones.plan IS 'Plan contratado (pro_monthly, pro_yearly, etc.)';
+COMMENT ON COLUMN transacciones.rol_anterior IS 'Rol del usuario antes de la transacción';
+COMMENT ON COLUMN transacciones.rol_nuevo IS 'Rol del usuario después de la transacción';
 
 -- ============================================================
 -- DATOS DE PRUEBA (opcional)

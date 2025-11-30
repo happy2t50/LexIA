@@ -21,17 +21,18 @@ export class TransactionRepository {
     monto: number,
     moneda: string,
     estado: TransactionStatus,
+    plan?: string,
     stripeSessionId?: string,
-    suscripcionAnterior?: number,
-    suscripcionNueva?: number,
+    rolAnterior?: number,
+    rolNuevo?: number,
     metadata?: Record<string, any>
   ): Promise<Transaction> {
     const query = `
       INSERT INTO transacciones (
-        usuario_id, monto, moneda, estado, stripe_session_id,
-        suscripcion_anterior, suscripcion_nueva, metadata
+        usuario_id, monto, moneda, estado, plan, stripe_session_id,
+        rol_anterior, rol_nuevo, metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
 
@@ -40,9 +41,10 @@ export class TransactionRepository {
       monto,
       moneda,
       estado,
+      plan,
       stripeSessionId,
-      suscripcionAnterior,
-      suscripcionNueva,
+      rolAnterior,
+      rolNuevo,
       metadata ? JSON.stringify(metadata) : null,
     ];
 
@@ -133,34 +135,34 @@ export class TransactionRepository {
   }
 
   /**
-   * Actualizar suscripción del usuario
+   * Actualizar rol del usuario
    */
-  async updateUserSubscription(
+  async updateUserRole(
     usuarioId: string,
-    suscripcionId: number
+    rolId: number
   ): Promise<void> {
     const query = `
       UPDATE usuarios
-      SET suscripcion_id = $1, updated_at = NOW()
+      SET rol_id = $1, updated_at = NOW()
       WHERE id = $2
     `;
 
-    await this.pool.query(query, [suscripcionId, usuarioId]);
-    console.log(`✅ Suscripción actualizada para usuario ${usuarioId} a plan ${suscripcionId}`);
+    await this.pool.query(query, [rolId, usuarioId]);
+    console.log(`✅ Rol actualizado para usuario ${usuarioId} a rol ${rolId}`);
   }
 
   /**
-   * Obtener suscripción actual del usuario
+   * Obtener rol actual del usuario
    */
-  async getUserCurrentSubscription(usuarioId: string): Promise<number | null> {
-    const query = 'SELECT suscripcion_id FROM usuarios WHERE id = $1';
+  async getUserCurrentRole(usuarioId: string): Promise<number | null> {
+    const query = 'SELECT rol_id FROM usuarios WHERE id = $1';
     const result = await this.pool.query(query, [usuarioId]);
 
     if (result.rows.length === 0) {
       return null;
     }
 
-    return result.rows[0].suscripcion_id;
+    return result.rows[0].rol_id;
   }
 
   /**
@@ -176,8 +178,11 @@ export class TransactionRepository {
       estado: row.estado as TransactionStatus,
       stripe_payment_id: row.stripe_payment_id,
       stripe_session_id: row.stripe_session_id,
-      suscripcion_anterior: row.suscripcion_anterior,
-      suscripcion_nueva: row.suscripcion_nueva,
+      stripe_customer_id: row.stripe_customer_id,
+      stripe_subscription_id: row.stripe_subscription_id,
+      plan: row.plan,
+      rol_anterior: row.rol_anterior,
+      rol_nuevo: row.rol_nuevo,
       metadata: row.metadata,
       created_at: row.created_at,
       updated_at: row.updated_at,

@@ -3,16 +3,16 @@
  * Manejo de pagos y suscripciones con Stripe
  */
 
+// IMPORTANTE: Cargar variables de entorno PRIMERO
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 import transactionRoutes from './routes/transactionRoutes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { closePool } from './config/database';
-
-// Cargar variables de entorno
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3005;

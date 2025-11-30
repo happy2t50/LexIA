@@ -6,7 +6,7 @@ import { getDistance } from 'geolib';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3008;
+const PORT = process.env.PORT || 3006;
 
 app.use(cors());
 app.use(express.json());

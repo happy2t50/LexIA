@@ -42,8 +42,8 @@ export class TransactionController {
 
       const planConfig = PLANS[plan];
 
-      // Obtener suscripción actual del usuario
-      const suscripcionAnterior = await this.transactionRepo.getUserCurrentSubscription(usuario_id);
+      // Obtener rol actual del usuario
+      const rolAnterior = await this.transactionRepo.getUserCurrentRole(usuario_id);
 
       // Crear transacción pendiente en la base de datos
       const transaction = await this.transactionRepo.create(
@@ -51,9 +51,10 @@ export class TransactionController {
         planConfig.amount,
         planConfig.currency,
         TransactionStatus.PENDING,
+        plan,
         undefined,
-        suscripcionAnterior || undefined,
-        planConfig.suscripcion_id,
+        rolAnterior || undefined,
+        planConfig.rol_id,
         metadata
       );
 
@@ -215,15 +216,15 @@ export class TransactionController {
       session.payment_method_types?.[0]
     );
 
-    // Actualizar suscripción del usuario
-    if (transaction.suscripcion_nueva) {
-      await this.transactionRepo.updateUserSubscription(
+    // Actualizar rol del usuario
+    if (transaction.rol_nuevo) {
+      await this.transactionRepo.updateUserRole(
         transaction.usuario_id,
-        transaction.suscripcion_nueva
+        transaction.rol_nuevo
       );
     }
 
-    console.log(`✅ Transacción ${transaction.id} completada y suscripción actualizada`);
+    console.log(`✅ Transacción ${transaction.id} completada y rol actualizado`);
   }
 
   /**

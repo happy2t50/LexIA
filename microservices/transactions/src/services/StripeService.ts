@@ -15,7 +15,7 @@ export class StripeService {
     }
 
     this.stripe = new Stripe(stripeSecretKey, {
-      apiVersion: '2024-11-20.acacia',
+      apiVersion: '2023-10-16',
     });
 
     console.log('✅ Stripe inicializado correctamente');
@@ -52,7 +52,7 @@ export class StripeService {
       metadata: {
         usuario_id: usuarioId,
         plan: plan,
-        suscripcion_nueva: planConfig.suscripcion_id.toString(),
+        rol_nuevo: planConfig.rol_id.toString(),
         ...metadata,
       },
     });

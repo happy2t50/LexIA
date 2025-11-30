@@ -29,8 +29,8 @@ services:
       dockerfile: Dockerfile
     container_name: lexia-auth
     environment:
-      PORT: 3008
-      NODE_ENV: production
+      PORT: 3003
+      NODE_ENV: development
 
       # Database
       DB_HOST: postgres
@@ -45,17 +45,17 @@ services:
       JWT_ACCESS_EXPIRES: 15m
       JWT_REFRESH_EXPIRES: 7d
 
-      # OAuth2 Google (configurar con tus credenciales)
-      GOOGLE_CLIENT_ID: ""
-      GOOGLE_CLIENT_SECRET: ""
+      # OAuth2 Google (configurar con tus credenciales - ver GOOGLE_OAUTH_SETUP_GUIDE.md)
+      GOOGLE_CLIENT_ID: "your-google-client-id-from-console.apps.googleusercontent.com"
+      GOOGLE_CLIENT_SECRET: "GOCSPX-your-google-client-secret-here"
       GOOGLE_CALLBACK_URL: http://localhost/api/auth/google/callback
 
-      # Email (SMTP - configurar para producción)
+      # Email (SMTP - configurar para producción - ver GMAIL_SMTP_SETUP_GUIDE.md)
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: 587
       SMTP_SECURE: "false"
-      SMTP_USER: ""
-      SMTP_PASSWORD: ""
+      SMTP_USER: "your-email@gmail.com"
+      SMTP_PASSWORD: "your-app-password-here"
 
       # Frontend URL (para emails y redirects)
       FRONTEND_URL: http://localhost:3000
@@ -63,7 +63,7 @@ services:
       # CORS
       CORS_ORIGIN: "*"
     ports:
-      - "3008:3008"
+      - "3003:3003"
     depends_on:
       postgres:
         condition: service_healthy
@@ -241,6 +241,22 @@ services:
       - lexia-network
     restart: unless-stopped
 
+  # Geo-Assistance Service
+  geo-assistance:
+    build:
+      context: ./microservices/geo-assistance
+      dockerfile: Dockerfile
+    container_name: lexia-geo-assistance
+    environment:
+      PORT: 3006
+      NODE_ENV: production
+      CORS_ORIGIN: "*"
+    ports:
+      - "3006:3006"
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
   # Nginx API Gateway (Reverse Proxy)
   nginx:
     image: nginx:alpine
@@ -257,6 +273,7 @@ services:
       - rag
       - chat
       - transactions
+      - geo-assistance
     networks:
       - lexia-network
     restart: unless-stopped

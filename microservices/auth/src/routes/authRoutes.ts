@@ -86,6 +86,13 @@ router.get('/google', OAuthController.googleLogin);
  */
 router.get('/google/callback', OAuthController.googleCallback);
 
+/**
+ * @route POST /api/auth/google/verify
+ * @desc Verificar token de Google (para apps móviles)
+ * @access Public
+ */
+router.post('/google/verify', OAuthController.verifyGoogleToken);
+
 // =====================================================
 // RUTAS PROTEGIDAS (requieren autenticación)
 // =====================================================

@@ -11,8 +11,11 @@ export interface Transaction {
   estado: TransactionStatus;
   stripe_payment_id?: string;
   stripe_session_id?: string;
-  suscripcion_anterior?: number;
-  suscripcion_nueva?: number;
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  plan?: string;
+  rol_anterior?: number;
+  rol_nuevo?: number;
   metadata?: Record<string, any>;
   created_at: Date;
   updated_at: Date;
@@ -67,7 +70,7 @@ export interface PlanConfig {
   amount: number;
   currency: string;
   interval: 'month' | 'year';
-  suscripcion_id: number;
+  rol_id: number; // ID del rol (Abogado=2, Anunciante=3, etc.)
 }
 
 export const PLANS: Record<string, PlanConfig> = {
@@ -77,7 +80,7 @@ export const PLANS: Record<string, PlanConfig> = {
     amount: 9.99,
     currency: 'USD',
     interval: 'month',
-    suscripcion_id: 2
+    rol_id: 2 // Abogado
   },
   pro_yearly: {
     name: 'Plan Pro Anual',
@@ -85,6 +88,6 @@ export const PLANS: Record<string, PlanConfig> = {
     amount: 99.99,
     currency: 'USD',
     interval: 'year',
-    suscripcion_id: 2
+    rol_id: 2 // Abogado
   }
 };

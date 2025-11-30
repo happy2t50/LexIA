@@ -1,6 +1,9 @@
 # Claude AI
 .claude/
 
+# FromIntegrador folder (Flutter app - separate repository)
+FromIntegrador/
+
 # Dependencies
 node_modules/
 */node_modules/

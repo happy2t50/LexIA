@@ -117,6 +117,49 @@ export class OAuthController {
             });
         }
     }
+
+    /**
+     * POST /api/auth/google/verify
+     * Verificar token de Google (para apps móviles)
+     */
+    async verifyGoogleToken(req: Request, res: Response): Promise<void> {
+        try {
+            const { idToken } = req.body;
+
+            if (!idToken) {
+                res.status(400).json({
+                    error: 'Token requerido',
+                    message: 'El campo idToken es obligatorio'
+                });
+                return;
+            }
+
+            // Verificar el token con Google y crear/obtener usuario
+            const result = await OAuthService.verifyGoogleIdToken(idToken);
+
+            res.json({
+                message: result.isNewUser ? 'Usuario registrado exitosamente' : 'Login exitoso',
+                accessToken: result.tokens.accessToken,
+                refreshToken: result.tokens.refreshToken,
+                expiresIn: result.tokens.accessTokenExpiresIn,
+                user: {
+                    id: result.user.id,
+                    email: result.user.email,
+                    nombre: result.user.nombre,
+                    apellido: result.user.apellido,
+                    rol: result.user.rol,
+                    emailVerified: result.user.email_verified
+                },
+                isNewUser: result.isNewUser
+            });
+        } catch (error: any) {
+            console.error('Error en verifyGoogleToken:', error);
+            res.status(401).json({
+                error: 'Error de autenticación',
+                message: error.message || 'Token de Google inválido o expirado'
+            });
+        }
+    }
 }
 
 export default new OAuthController();
