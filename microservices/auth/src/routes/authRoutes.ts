@@ -42,10 +42,17 @@ router.post('/refresh', refreshTokenValidation, AuthController.refresh);
 
 /**
  * @route POST /api/auth/verify-email
- * @desc Verificar email con token
+ * @desc Verificar email con token (POST)
  * @access Public
  */
 router.post('/verify-email', verifyEmailValidation, AuthController.verifyEmail);
+
+/**
+ * @route GET /api/auth/verify-email
+ * @desc Verificar email desde enlace (GET)
+ * @access Public
+ */
+router.get('/verify-email', AuthController.verifyEmailFromLink);
 
 /**
  * @route POST /api/auth/resend-verification
@@ -117,6 +124,13 @@ router.post('/logout-all', authenticate, AuthController.logoutAll);
  * @access Private
  */
 router.get('/me', authenticate, AuthController.getProfile);
+
+/**
+ * @route PUT /api/auth/me
+ * @desc Actualizar perfil del usuario autenticado
+ * @access Private
+ */
+router.put('/me', authenticate, AuthController.updateProfile);
 
 /**
  * @route GET /api/auth/sessions

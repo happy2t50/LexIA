@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
 import OAuthService from './services/OAuthService';
-import securityHeaders, { forceHTTPS, validateOrigin } from './middleware/securityHeaders';
+import securityHeaders, { forceHTTPS } from './middleware/securityHeaders';
 import { requestLogger } from './middleware/sanitizeLogs';
 import { validateSecrets, validateCryptoAlgorithms } from './config/security';
 
@@ -36,17 +35,19 @@ if (process.env.NODE_ENV === 'production') {
     app.use(forceHTTPS);
 }
 
-// MSTG-ARCH-2: Validar origen de peticiones
-const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ['*'];
+// MSTG-ARCH-2: CORS está manejado por nginx, no duplicar aquí
+// Si el servicio se ejecuta directamente (sin nginx), descomentar esto:
+/*
+const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000', 'http://localhost:8080'];
 app.use(validateOrigin(allowedOrigins));
 
-// CORS con configuración segura
 app.use(cors({
-    origin: (origin, callback) => {
-        // Permitir peticiones sin origin (ej: mobile apps, Postman)
+    origin: (origin: string | undefined, callback) => {
         if (!origin) return callback(null, true);
-
-        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
+            return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             callback(new Error('No permitido por CORS'));
@@ -56,8 +57,9 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['X-Total-Count'],
-    maxAge: 600 // 10 minutos de cache para preflight
+    maxAge: 600
 }));
+*/
 
 // Body parsers con límite de tamaño (prevenir DoS)
 app.use(express.json({ limit: '1mb' }));

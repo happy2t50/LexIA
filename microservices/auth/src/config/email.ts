@@ -45,15 +45,15 @@ export const emailTemplates = {
                 <h2 style="color: #2563eb;">¡Bienvenido a LexIA, ${nombre}!</h2>
                 <p>Gracias por registrarte. Para completar tu registro, por favor verifica tu correo electrónico.</p>
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}"
+                    <a href="${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}"
                        style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
                         Verificar Email
                     </a>
                 </div>
                 <p style="color: #666; font-size: 14px;">
                     O copia y pega este enlace en tu navegador:<br>
-                    <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}">
-                        ${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}
+                    <a href="${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}">
+                        ${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}
                     </a>
                 </p>
                 <p style="color: #666; font-size: 12px; margin-top: 30px;">

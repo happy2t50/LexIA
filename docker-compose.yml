@@ -45,17 +45,17 @@ services:
       JWT_ACCESS_EXPIRES: 15m
       JWT_REFRESH_EXPIRES: 7d
 
-      # OAuth2 Google (configurar con tus credenciales - ver GOOGLE_OAUTH_SETUP_GUIDE.md)
-      GOOGLE_CLIENT_ID: "your-google-client-id-from-console.apps.googleusercontent.com"
-      GOOGLE_CLIENT_SECRET: "GOCSPX-your-google-client-secret-here"
+      # OAuth2 Google (configurar con tus credenciales en .env)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-your_google_client_id}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-your_google_client_secret}
       GOOGLE_CALLBACK_URL: http://localhost/api/auth/google/callback
 
-      # Email (SMTP - configurar para producción - ver GMAIL_SMTP_SETUP_GUIDE.md)
+      # Email (SMTP - configurar en .env para producción)
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: 587
       SMTP_SECURE: "false"
-      SMTP_USER: "your-email@gmail.com"
-      SMTP_PASSWORD: "your-app-password-here"
+      SMTP_USER: ${SMTP_USER:-your_smtp_email}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-your_smtp_password}
 
       # Frontend URL (para emails y redirects)
       FRONTEND_URL: http://localhost:3000

@@ -9,7 +9,9 @@ export class ConversationService {
   /**
    * Crear nueva sesión de chat
    */
-  async createSession(usuarioId: string): Promise<Session> {
+  async createSession(usuarioId: string, nombre?: string): Promise<Session> {
+    // Asegurar que el usuario exista en la tabla de usuarios del servicio de chat
+    await this.ensureUserExists(usuarioId, nombre);
     const sessionId = uuidv4();
 
     const result = await this.pool.query(
@@ -25,7 +27,7 @@ export class ConversationService {
   /**
    * Obtener sesión activa del usuario o crear una nueva
    */
-  async getOrCreateSession(usuarioId: string): Promise<Session> {
+  async getOrCreateSession(usuarioId: string, nombre?: string): Promise<Session> {
     // Buscar sesión activa
     const result = await this.pool.query(
       `SELECT * FROM sesiones_chat
@@ -40,7 +42,7 @@ export class ConversationService {
     }
 
     // Crear nueva sesión
-    return this.createSession(usuarioId);
+    return this.createSession(usuarioId, nombre);
   }
 
   /**
@@ -59,6 +61,8 @@ export class ConversationService {
       contexto?: any;
     }
   ): Promise<Message> {
+    // Por seguridad, si llega un usuario nuevo por aquí, crearlo también
+    await this.ensureUserExists(usuarioId);
     const messageId = uuidv4();
 
     const embeddingStr = metadata?.embedding
@@ -113,9 +117,12 @@ export class ConversationService {
    * Retorna mensajes recientes para dar contexto al LLM
    */
   async getConversationContext(sesionId: string): Promise<string> {
-    const messages = await this.getConversationHistory(sesionId, 5);
+    // Obtener últimos mensajes, excluyendo los de tipo 'system'
+    const messages = (await this.getConversationHistory(sesionId, 6))
+      .filter(m => m.rol !== 'system');
 
-    if (messages.length === 0) {
+    // Si aún no hay intercambio real (usuario/asistente), no añadir contexto
+    if (messages.length < 2) {
       return '';
     }
 
@@ -296,5 +303,19 @@ export class ConversationService {
       fechaUltimoMensaje: row.fecha_ultimo_mensaje,
       activa: row.activa
     };
+  }
+
+  /**
+   * Garantiza que el usuario exista en la tabla `usuarios` del servicio de chat.
+   * Si no existe, lo inserta con los datos mínimos disponibles.
+   */
+  private async ensureUserExists(usuarioId: string, nombre?: string): Promise<void> {
+    const exists = await this.pool.query(`SELECT 1 FROM usuarios WHERE id = $1 LIMIT 1`, [usuarioId]);
+    if (exists.rows.length > 0) return;
+    // Insertar registro mínimo; otras columnas deben tener DEFAULT o permitir NULL
+    await this.pool.query(
+      `INSERT INTO usuarios (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+      [usuarioId, nombre || 'Usuario']
+    );
   }
 }

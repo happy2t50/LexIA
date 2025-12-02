@@ -16,6 +16,13 @@ export interface RegisterData {
     telefono?: string;
 }
 
+export interface UpdateProfileData {
+    nombre?: string;
+    apellidos?: string;
+    email?: string;
+    telefono?: string;
+}
+
 export interface LoginData {
     email: string;
     password: string;
@@ -484,6 +491,54 @@ export class AuthService {
         }
 
         const { password_hash, ...userWithoutPassword } = user;
+        return userWithoutPassword;
+    }
+
+    /**
+     * Actualizar perfil de usuario
+     */
+    async updateProfile(userId: number, data: UpdateProfileData): Promise<Omit<User, 'password_hash'>> {
+        // Verificar que el usuario existe
+        const existingUser = await UserRepository.findById(userId);
+        if (!existingUser) {
+            throw new Error('Usuario no encontrado');
+        }
+
+        // Si se quiere cambiar el email, verificar que no esté en uso por otro usuario
+        if (data.email && data.email !== existingUser.email) {
+            const emailExists = await UserRepository.findByEmail(data.email);
+            if (emailExists && emailExists.id !== userId) {
+                throw new Error('El email ya está en uso por otro usuario');
+            }
+        }
+
+        // Preparar datos para actualizar
+        const updateData: Partial<User> = {};
+        
+        if (data.nombre !== undefined) {
+            updateData.nombre = data.nombre.trim();
+        }
+        
+        if (data.apellidos !== undefined) {
+            updateData.apellido = data.apellidos.trim(); // Mapear apellidos -> apellido
+        }
+        
+        if (data.email !== undefined) {
+            updateData.email = data.email.toLowerCase().trim();
+        }
+        
+        if (data.telefono !== undefined) {
+            updateData.telefono = data.telefono.trim();
+        }
+
+        // Actualizar usuario
+        const updatedUser = await UserRepository.update(userId, updateData);
+        if (!updatedUser) {
+            throw new Error('Error al actualizar el perfil');
+        }
+
+        // Retornar usuario sin password
+        const { password_hash, ...userWithoutPassword } = updatedUser;
         return userWithoutPassword;
     }
 

@@ -2,6 +2,15 @@
 import { Pool } from 'pg';
 import { getEmbeddingService, EmbeddingService } from './EmbeddingService.js';
 
+// Metadatos para filtrado y contexto
+export interface ChunkMetadata {
+  jurisdiccion: string;        // "Chiapas", "Federal", "Municipal"
+  tipoDocumento: string;       // "Reglamento", "Ley", "Código", "Norma"
+  vigencia: string;            // "2025", "Vigente", "Histórico"
+  numeroArticulo?: string;     // "52", "111-A"
+  temasPrincipales: string[];  // ["multas", "estacionamiento", "infracciones"]
+}
+
 export interface DocumentChunk {
   id: string;
   documentoId: string;
@@ -10,6 +19,7 @@ export interface DocumentChunk {
   tituloDocumento: string;
   categoria: string;
   cluster: string;
+  metadata?: ChunkMetadata;
 }
 
 export interface RAGResult {
@@ -18,6 +28,11 @@ export interface RAGResult {
   contexto: string;
   cluster?: string;
   tiempoBusquedaMs: number;
+  metadataAgregada?: {
+    jurisdicciones: string[];
+    tiposDocumento: string[];
+    articulosReferenciados: string[];
+  };
 }
 
 export class RAGService {
@@ -188,50 +203,140 @@ export class RAGService {
   }
 
   /**
-   * Indexar un nuevo documento
+   * Indexar un nuevo documento CON METADATOS
    */
   async indexDocument(
     titulo: string,
     contenido: string,
     fuente: string,
     categoria: string,
-    clusterRelacionado: string
+    clusterRelacionado: string,
+    metadataOpcional?: Partial<ChunkMetadata>
   ): Promise<string> {
     try {
-      // 1. Insertar documento
+      // 1. Extraer metadatos automáticamente del contenido
+      const metadataExtraida = this.extraerMetadatos(titulo, contenido, fuente, metadataOpcional);
+      
+      // 2. Insertar documento con metadatos
       const documentoResult = await this.pool.query(
-        `INSERT INTO documentos_legales (titulo, contenido, fuente, categoria, cluster_relacionado)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO documentos_legales (titulo, contenido, fuente, categoria, cluster_relacionado, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          RETURNING id`,
-        [titulo, contenido, fuente, categoria, clusterRelacionado]
+        [titulo, contenido, fuente, categoria, clusterRelacionado, JSON.stringify(metadataExtraida)]
       );
 
       const documentoId = documentoResult.rows[0].id;
 
-      // 2. Dividir en chunks
-      const maxChunkSize = parseInt(process.env.MAX_CHUNK_SIZE || '512', 10);
+      // 3. Dividir en chunks semánticos (mejorado)
+      const maxChunkSize = parseInt(process.env.MAX_CHUNK_SIZE || '800', 10);
       const chunks = this.embeddingService.chunkText(contenido, maxChunkSize);
 
-      // 3. Generar embeddings para cada chunk
+      // 4. Generar embeddings para cada chunk
       const embeddings = await this.embeddingService.generateEmbeddingsBatch(chunks);
 
-      // 4. Insertar chunks con embeddings
+      // 5. Insertar chunks con embeddings Y metadatos por chunk
       for (let i = 0; i < chunks.length; i++) {
         const embeddingStr = `[${embeddings[i].join(',')}]`;
+        
+        // Extraer metadatos específicos del chunk (ej. número de artículo)
+        const chunkMetadata = this.extraerMetadatosChunk(chunks[i], metadataExtraida);
 
         await this.pool.query(
-          `INSERT INTO documento_chunks (documento_id, chunk_index, contenido, embedding)
-           VALUES ($1, $2, $3, $4::vector)`,
-          [documentoId, i, chunks[i], embeddingStr]
+          `INSERT INTO documento_chunks (documento_id, chunk_index, contenido, embedding, metadata)
+           VALUES ($1, $2, $3, $4::vector, $5::jsonb)`,
+          [documentoId, i, chunks[i], embeddingStr, JSON.stringify(chunkMetadata)]
         );
       }
 
-      console.log(`✅ Documento indexado: ${titulo} (${chunks.length} chunks)`);
+      console.log(`✅ Documento indexado: ${titulo} (${chunks.length} chunks con metadatos)`);
+      console.log(`   📋 Metadatos: ${metadataExtraida.jurisdiccion} | ${metadataExtraida.tipoDocumento} | Temas: ${metadataExtraida.temasPrincipales.join(', ')}`);
       return documentoId;
     } catch (error: any) {
       console.error('Error al indexar documento:', error);
       throw new Error(`No se pudo indexar documento: ${error.message}`);
     }
+  }
+
+  /**
+   * Extraer metadatos automáticamente del documento
+   */
+  private extraerMetadatos(
+    titulo: string,
+    contenido: string,
+    fuente: string,
+    metadataOpcional?: Partial<ChunkMetadata>
+  ): ChunkMetadata {
+    const textoCompleto = `${titulo} ${contenido}`.toLowerCase();
+    
+    // === Detectar Jurisdicción ===
+    let jurisdiccion = 'Chiapas'; // Por defecto
+    if (textoCompleto.includes('federal') || textoCompleto.includes('nacional')) {
+      jurisdiccion = 'Federal';
+    } else if (textoCompleto.includes('tuxtla') || textoCompleto.includes('municipal')) {
+      jurisdiccion = 'Municipal - Tuxtla Gutiérrez';
+    }
+    
+    // === Detectar Tipo de Documento ===
+    let tipoDocumento = 'Reglamento';
+    if (textoCompleto.includes('ley de') || textoCompleto.includes('ley del')) {
+      tipoDocumento = 'Ley';
+    } else if (textoCompleto.includes('código')) {
+      tipoDocumento = 'Código';
+    } else if (textoCompleto.includes('norma') || textoCompleto.includes('nom-')) {
+      tipoDocumento = 'Norma Oficial';
+    }
+    
+    // === Detectar Vigencia ===
+    const anioMatch = contenido.match(/(?:vigente|actualizado|modificado|publicado)\s*(?:en|al)?\s*(\d{4})/i);
+    const vigencia = anioMatch ? anioMatch[1] : '2025';
+    
+    // === Detectar Temas Principales ===
+    const temasDetectados: string[] = [];
+    const temasKeywords: Record<string, string[]> = {
+      'multas': ['multa', 'infracción', 'sanción', 'penalidad'],
+      'estacionamiento': ['estacionar', 'aparcar', 'estacionamiento', 'banqueta', 'acera'],
+      'semáforos': ['semáforo', 'alto', 'luz roja', 'señal'],
+      'accidentes': ['accidente', 'choque', 'colisión', 'siniestro'],
+      'licencias': ['licencia', 'permiso', 'conducir'],
+      'alcohol': ['alcohol', 'alcoholímetro', 'ebriedad', 'estado de ebriedad'],
+      'documentos': ['tarjeta de circulación', 'verificación', 'seguro', 'póliza'],
+      'velocidad': ['velocidad', 'exceso de velocidad', 'límite'],
+      'derechos': ['derechos', 'garantías', 'debido proceso'],
+      'impugnación': ['recurso', 'impugnar', 'inconformidad', 'apelación']
+    };
+    
+    for (const [tema, keywords] of Object.entries(temasKeywords)) {
+      if (keywords.some(kw => textoCompleto.includes(kw))) {
+        temasDetectados.push(tema);
+      }
+    }
+    
+    // Si no se detectaron temas, usar la categoría
+    if (temasDetectados.length === 0) {
+      temasDetectados.push(fuente || 'general');
+    }
+    
+    return {
+      jurisdiccion: metadataOpcional?.jurisdiccion || jurisdiccion,
+      tipoDocumento: metadataOpcional?.tipoDocumento || tipoDocumento,
+      vigencia: metadataOpcional?.vigencia || vigencia,
+      temasPrincipales: metadataOpcional?.temasPrincipales || temasDetectados
+    };
+  }
+
+  /**
+   * Extraer metadatos específicos de cada chunk (número de artículo, etc.)
+   */
+  private extraerMetadatosChunk(chunk: string, metadataBase: ChunkMetadata): ChunkMetadata {
+    const chunkMetadata = { ...metadataBase };
+    
+    // Extraer número de artículo del chunk
+    const articuloMatch = chunk.match(/(?:Art[íi]culo|ART[ÍI]CULO)\s*(\d+[\w\-]*)/i);
+    if (articuloMatch) {
+      chunkMetadata.numeroArticulo = articuloMatch[1];
+    }
+    
+    return chunkMetadata;
   }
 
   /**

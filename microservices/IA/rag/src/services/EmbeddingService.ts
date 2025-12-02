@@ -131,39 +131,148 @@ export class EmbeddingService {
   }
 
   /**
-   * Dividir texto largo en chunks
+   * Dividir texto largo en chunks SEMÁNTICOS (optimizado para documentos legales)
+   * Prioriza mantener artículos completos en lugar de cortar arbitrariamente
    * @param text Texto completo
-   * @param maxChunkSize Tamaño máximo de cada chunk
+   * @param maxChunkSize Tamaño máximo de cada chunk (en caracteres)
    * @param overlap Overlap entre chunks
-   * @returns Array de chunks
+   * @returns Array de chunks semánticamente coherentes
    */
-  chunkText(text: string, maxChunkSize: number = 512, overlap: number = 50): string[] {
-    const words = text.split(/\s+/);
+  chunkText(text: string, maxChunkSize: number = 800, overlap: number = 100): string[] {
     const chunks: string[] = [];
-
-    let currentChunk: string[] = [];
-    let currentSize = 0;
-
-    for (const word of words) {
-      currentChunk.push(word);
-      currentSize += word.length + 1; // +1 por el espacio
-
-      if (currentSize >= maxChunkSize) {
-        chunks.push(currentChunk.join(' '));
-
-        // Mantener overlap
-        const overlapWords = Math.floor(overlap / 10); // Aproximadamente 10 chars por palabra
-        currentChunk = currentChunk.slice(-overlapWords);
-        currentSize = currentChunk.reduce((sum, w) => sum + w.length + 1, 0);
+    
+    // === PASO 1: Detectar si es documento legal con artículos ===
+    const articuloPattern = /(?:Art[íi]culo|ART[ÍI]CULO|ARTÍCULO)\s*(\d+[\w\-]*)/gi;
+    const tieneArticulos = articuloPattern.test(text);
+    
+    if (tieneArticulos) {
+      // Chunking semántico para documentos legales
+      return this.chunkLegalDocument(text, maxChunkSize);
+    }
+    
+    // === PASO 2: Chunking por párrafos para otros documentos ===
+    const paragraphs = text.split(/\n\s*\n/);
+    let currentChunk = '';
+    
+    for (const paragraph of paragraphs) {
+      const trimmedParagraph = paragraph.trim();
+      if (!trimmedParagraph) continue;
+      
+      // Si agregar este párrafo excede el límite, guardar chunk actual
+      if (currentChunk.length + trimmedParagraph.length > maxChunkSize && currentChunk) {
+        chunks.push(currentChunk.trim());
+        // Mantener overlap con últimas palabras del chunk anterior
+        const words = currentChunk.split(/\s+/);
+        const overlapWords = words.slice(-Math.floor(overlap / 8));
+        currentChunk = overlapWords.join(' ') + ' ' + trimmedParagraph;
+      } else {
+        currentChunk += (currentChunk ? '\n\n' : '') + trimmedParagraph;
       }
     }
-
-    // Agregar último chunk si no está vacío
-    if (currentChunk.length > 0) {
-      chunks.push(currentChunk.join(' '));
+    
+    // Agregar último chunk
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
     }
-
+    
+    // Si no se generaron chunks (texto muy corto), retornar texto original
+    if (chunks.length === 0 && text.trim()) {
+      chunks.push(text.trim());
+    }
+    
     return chunks;
+  }
+
+  /**
+   * Chunking especializado para documentos legales
+   * Mantiene artículos completos como unidades de información
+   */
+  private chunkLegalDocument(text: string, maxChunkSize: number = 800): string[] {
+    const chunks: string[] = [];
+    
+    // Patrón para detectar inicio de artículos
+    const articuloRegex = /(?=(?:Art[íi]culo|ART[ÍI]CULO|ARTÍCULO)\s*\d+)/gi;
+    
+    // Dividir por artículos
+    const articulos = text.split(articuloRegex).filter(a => a.trim());
+    
+    let currentChunk = '';
+    let currentArticuloNum = '';
+    
+    for (const articulo of articulos) {
+      const trimmedArticulo = articulo.trim();
+      if (!trimmedArticulo) continue;
+      
+      // Extraer número de artículo para metadata
+      const numMatch = trimmedArticulo.match(/(?:Art[íi]culo|ART[ÍI]CULO|ARTÍCULO)\s*(\d+[\w\-]*)/i);
+      const artNum = numMatch ? numMatch[1] : '';
+      
+      // Si el artículo cabe en el chunk actual
+      if (currentChunk.length + trimmedArticulo.length <= maxChunkSize) {
+        currentChunk += (currentChunk ? '\n\n' : '') + trimmedArticulo;
+        if (artNum) currentArticuloNum = artNum;
+      } else {
+        // Guardar chunk actual si existe
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+        }
+        
+        // Si el artículo es muy largo, dividirlo por fracciones/incisos
+        if (trimmedArticulo.length > maxChunkSize) {
+          const subChunks = this.chunkLargeArticle(trimmedArticulo, maxChunkSize);
+          chunks.push(...subChunks);
+          currentChunk = '';
+        } else {
+          currentChunk = trimmedArticulo;
+          currentArticuloNum = artNum;
+        }
+      }
+    }
+    
+    // Agregar último chunk
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
+  }
+
+  /**
+   * Dividir artículos muy largos por fracciones/incisos
+   */
+  private chunkLargeArticle(articulo: string, maxChunkSize: number): string[] {
+    const chunks: string[] = [];
+    
+    // Extraer el encabezado del artículo (primera línea)
+    const lines = articulo.split('\n');
+    const header = lines[0];
+    const content = lines.slice(1).join('\n');
+    
+    // Dividir por fracciones (I., II., III. o a), b), c))
+    const fraccionPattern = /(?=(?:\n|^)\s*(?:[IVX]+[\.\-\)]|[a-z]\)|[0-9]+[\.\-\)]))/gi;
+    const fracciones = content.split(fraccionPattern).filter(f => f.trim());
+    
+    let currentChunk = header;
+    
+    for (const fraccion of fracciones) {
+      const trimmedFraccion = fraccion.trim();
+      
+      if (currentChunk.length + trimmedFraccion.length <= maxChunkSize) {
+        currentChunk += '\n' + trimmedFraccion;
+      } else {
+        if (currentChunk.trim() !== header) {
+          chunks.push(currentChunk.trim());
+        }
+        // Nuevo chunk con el header para contexto
+        currentChunk = header + '\n[Continuación]\n' + trimmedFraccion;
+      }
+    }
+    
+    if (currentChunk.trim() && currentChunk.trim() !== header) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks.length > 0 ? chunks : [articulo.substring(0, maxChunkSize)];
   }
 
   /**

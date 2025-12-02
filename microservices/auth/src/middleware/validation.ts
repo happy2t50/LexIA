@@ -22,9 +22,28 @@ export function handleValidationErrors(req: Request, res: Response, next: NextFu
 }
 
 /**
+ * Middleware para normalizar campos de apellidos
+ * Convierte 'apellidos' a 'apellido' si no existe
+ */
+export function normalizeApellidosField(req: Request, res: Response, next: NextFunction): void {
+    console.log('🔄 Normalizando apellidos:', JSON.stringify(req.body, null, 2));
+    
+    if (req.body.apellidos && !req.body.apellido) {
+        req.body.apellido = req.body.apellidos;
+        console.log('✅ Convertido apellidos -> apellido:', req.body.apellido);
+    } else if (req.body.apellidos && req.body.apellido) {
+        console.log('ℹ️ Ambos campos presentes, usando apellido:', req.body.apellido);
+    }
+    
+    console.log('📦 Body después de normalización:', JSON.stringify(req.body, null, 2));
+    next();
+}
+
+/**
  * Reglas de validación para registro
  */
 export const registerValidation = [
+    normalizeApellidosField, // Normalizar apellidos -> apellido
     body('email')
         .isEmail()
         .withMessage('Email inválido')
@@ -44,6 +63,11 @@ export const registerValidation = [
         .withMessage('El apellido es requerido')
         .isLength({ min: 2, max: 50 })
         .withMessage('El apellido debe tener entre 2 y 50 caracteres'),
+    body('apellidos')
+        .optional()
+        .trim()
+        .isLength({ min: 2, max: 50 })
+        .withMessage('Los apellidos deben tener entre 2 y 50 caracteres'),
     body('telefono')
         .optional()
         .trim()

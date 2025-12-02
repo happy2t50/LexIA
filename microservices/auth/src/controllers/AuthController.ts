@@ -8,13 +8,19 @@ export class AuthController {
      */
     async register(req: Request, res: Response): Promise<void> {
         try {
-            const { email, password, nombre, apellido, telefono } = req.body;
+            const { email, password, nombre, apellido: apellidoRaw, apellidos, telefono } = req.body;
+            // Aceptar tanto "apellido" como "apellidos" del cliente
+            const apellido = (apellidoRaw ?? apellidos ?? '').toString().trim();
             const ipAddress = req.ip || req.socket.remoteAddress;
 
             const result = await AuthService.register(
                 { email, password, nombre, apellido, telefono },
                 ipAddress
             );
+
+            // En entorno de desarrollo, devolver URL de verificación para pruebas rápidas
+            const isProd = process.env.NODE_ENV === 'production';
+            const hasSmtp = !!process.env.SMTP_USER;
 
             res.status(201).json({
                 message: 'Usuario registrado exitosamente. Revisa tu email para verificar tu cuenta.',
@@ -23,7 +29,10 @@ export class AuthController {
                     email: result.user.email,
                     nombre: result.user.nombre,
                     apellido: result.user.apellido
-                }
+                },
+                ...(isProd || hasSmtp
+                    ? {}
+                    : { devVerificationUrl: `${req.protocol}://${req.get('host')}/api/auth/verify-email?token=${result.verificationToken}` })
             });
         } catch (error: any) {
             res.status(400).json({
@@ -159,7 +168,7 @@ export class AuthController {
 
     /**
      * POST /api/auth/verify-email
-     * Verificar email
+     * Verificar email (POST)
      */
     async verifyEmail(req: Request, res: Response): Promise<void> {
         try {
@@ -173,6 +182,70 @@ export class AuthController {
                 error: 'Error en la verificación',
                 message: error.message
             });
+        }
+    }
+
+    /**
+     * GET /api/auth/verify-email
+     * Verificar email desde enlace (GET)
+     */
+    async verifyEmailFromLink(req: Request, res: Response): Promise<void> {
+        try {
+            const { token } = req.query;
+
+            if (!token || typeof token !== 'string') {
+                res.status(400).json({
+                    error: 'Token requerido',
+                    message: 'El token de verificación es obligatorio'
+                });
+                return;
+            }
+
+            await AuthService.verifyEmail(token);
+
+            // Responder con HTML para mostrar en el navegador
+            res.send(`
+                <html>
+                    <head>
+                        <title>Email Verificado - LexIA</title>
+                        <meta charset="utf-8">
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+                            .success { color: #16a34a; }
+                            .container { max-width: 500px; margin: 0 auto; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <h1 class="success">✅ Email Verificado</h1>
+                            <p>Tu correo electrónico ha sido verificado exitosamente.</p>
+                            <p>Ya puedes cerrar esta ventana y continuar usando LexIA.</p>
+                        </div>
+                    </body>
+                </html>
+            `);
+        } catch (error: any) {
+            res.status(400).send(`
+                <html>
+                    <head>
+                        <title>Error de Verificación - LexIA</title>
+                        <meta charset="utf-8">
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; margin: 50px; }
+                            .error { color: #dc2626; }
+                            .container { max-width: 500px; margin: 0 auto; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <h1 class="error">❌ Error de Verificación</h1>
+                            <p>No se pudo verificar tu correo electrónico.</p>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                            <p>El enlace puede haber expirado. Intenta solicitar un nuevo enlace de verificación.</p>
+                        </div>
+                    </body>
+                </html>
+            `);
         }
     }
 
@@ -256,6 +329,40 @@ export class AuthController {
         } catch (error: any) {
             res.status(400).json({
                 error: 'Error al obtener perfil',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * PUT /api/auth/me
+     * Actualizar perfil del usuario autenticado
+     */
+    async updateProfile(req: Request, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.userId;
+
+            if (!userId) {
+                res.status(401).json({ error: 'No autenticado' });
+                return;
+            }
+
+            const { nombre, apellidos, email, telefono } = req.body;
+
+            const user = await AuthService.updateProfile(userId, {
+                nombre,
+                apellidos,
+                email,
+                telefono
+            });
+
+            res.json({ 
+                message: 'Perfil actualizado exitosamente',
+                user 
+            });
+        } catch (error: any) {
+            res.status(400).json({
+                error: 'Error al actualizar perfil',
                 message: error.message
             });
         }

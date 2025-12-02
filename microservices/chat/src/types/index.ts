@@ -26,6 +26,13 @@ export interface Session {
   activa: boolean;
 }
 
+export interface LegalResponse {
+  respuesta: string;
+  referenciaLegal: string;
+  pasosASeguir: string;
+  lugaresDondeAcudir: string;
+}
+
 export interface ChatResponse {
   mensaje: string;
   articulosRelevantes?: ArticuloRelevante[];

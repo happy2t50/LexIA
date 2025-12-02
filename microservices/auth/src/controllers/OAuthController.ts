@@ -120,22 +120,25 @@ export class OAuthController {
 
     /**
      * POST /api/auth/google/verify
-     * Verificar token de Google (para apps móviles)
+     * Verificar token de Google (para apps móviles y web)
+     * Acepta tanto idToken (móvil) como accessToken (web)
      */
     async verifyGoogleToken(req: Request, res: Response): Promise<void> {
         try {
-            const { idToken } = req.body;
+            const { idToken, accessToken } = req.body;
+            const token = idToken || accessToken;
 
-            if (!idToken) {
+            if (!token) {
                 res.status(400).json({
                     error: 'Token requerido',
-                    message: 'El campo idToken es obligatorio'
+                    message: 'El campo idToken o accessToken es obligatorio'
                 });
                 return;
             }
 
             // Verificar el token con Google y crear/obtener usuario
-            const result = await OAuthService.verifyGoogleIdToken(idToken);
+            // Detecta automáticamente si es idToken (móvil) o accessToken (web)
+            const result = await OAuthService.verifyGoogleToken(token);
 
             res.json({
                 message: result.isNewUser ? 'Usuario registrado exitosamente' : 'Login exitoso',

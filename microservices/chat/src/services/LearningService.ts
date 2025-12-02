@@ -107,10 +107,21 @@ export class LearningService {
 
     const result = await this.pool.query(query, params);
 
-    return {
-      metricas: result.rows,
-      total: result.rows.reduce((sum, r) => sum + parseInt(r.total), 0)
-    };
+    interface LearningMetric {
+      tipo: string;
+      total: string;
+      valoracion_promedio: number | null;
+    }
+
+    interface LearningMetricsResult {
+      metricas: LearningMetric[];
+      total: number;
+    }
+
+        return {
+          metricas: result.rows,
+          total: result.rows.reduce((sum: number, r: LearningMetric) => sum + parseInt(r.total), 0)
+        } as LearningMetricsResult;
   }
 
   /**

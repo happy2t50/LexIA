@@ -336,6 +336,202 @@ export class OAuthService {
     }
 
     /**
+     * Verificar Google Access Token (para web)
+     * Recibe el access token de Google y obtiene información del perfil
+     */
+    private async verifyGoogleAccessToken(accessToken: string): Promise<{
+        googleId: string;
+        email: string;
+        nombre: string;
+        apellido: string;
+        picture?: string;
+    }> {
+        try {
+            // Obtener información del usuario usando el access token
+            const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Access token inválido');
+            }
+
+            const data: any = await response.json();
+
+            if (!data.email || !data.id) {
+                throw new Error('Datos incompletos del usuario');
+            }
+
+            return {
+                googleId: data.id,
+                email: data.email,
+                nombre: data.given_name || 'Usuario',
+                apellido: data.family_name || '',
+                picture: data.picture
+            };
+        } catch (error: any) {
+            console.error('Error al verificar Google Access Token:', error);
+            throw new Error('Access token de Google inválido o expirado');
+        }
+    }
+
+    /**
+     * Verificar Google Token (idToken o accessToken)
+     * Detecta automáticamente el tipo de token y lo procesa
+     */
+    async verifyGoogleToken(token: string): Promise<OAuthLoginResult> {
+        // Intentar primero como idToken (móvil)
+        try {
+            return await this.verifyGoogleIdToken(token);
+        } catch (idTokenError) {
+            console.log('No es un idToken válido, intentando como accessToken...');
+
+            // Si falla, intentar como accessToken (web)
+            try {
+                const userData = await this.verifyGoogleAccessToken(token);
+                return await this.handleGoogleUser(userData, 'web');
+            } catch (accessTokenError) {
+                console.error('Token inválido tanto para idToken como accessToken:', { idTokenError, accessTokenError });
+                throw new Error('Token de Google inválido');
+            }
+        }
+    }
+
+    /**
+     * Procesar usuario de Google (común para idToken y accessToken)
+     */
+    private async handleGoogleUser(
+        userData: {
+            googleId: string;
+            email: string;
+            nombre: string;
+            apellido: string;
+            picture?: string;
+        },
+        platform: 'mobile' | 'web'
+    ): Promise<OAuthLoginResult> {
+        const { googleId, email, nombre, apellido, picture } = userData;
+
+        // Buscar si ya existe cuenta OAuth vinculada
+        let oauthAccount = await OAuthRepository.findByProvider('google', googleId);
+        let user;
+        let isNewUser = false;
+
+        if (oauthAccount) {
+            // Usuario existente con cuenta Google
+            user = await UserRepository.findById(oauthAccount.usuario_id);
+
+            if (!user) {
+                throw new Error('Usuario vinculado no encontrado');
+            }
+        } else {
+            // Verificar si existe usuario con ese email
+            user = await UserRepository.findByEmail(email);
+
+            if (user) {
+                // Usuario existe pero nunca vinculó Google, crear vinculación
+                await OAuthRepository.upsert({
+                    usuario_id: user.id,
+                    provider: 'google',
+                    provider_account_id: googleId,
+                    access_token: '',
+                    refresh_token: '',
+                    token_expires_at: new Date(Date.now() + 3600 * 1000),
+                    profile_data: {
+                        name: `${nombre} ${apellido}`,
+                        picture,
+                        email
+                    }
+                });
+
+                // Marcar email como verificado (Google ya lo verificó)
+                if (!user.email_verified) {
+                    await UserRepository.verifyEmail(user.id);
+                }
+            } else {
+                // Nuevo usuario, crear cuenta
+                const userData: CreateUserData = {
+                    email,
+                    nombre,
+                    apellido,
+                    rol: 'user',
+                    account_type: 'google'
+                };
+
+                user = await UserRepository.create(userData);
+
+                // Marcar email como verificado inmediatamente
+                await UserRepository.verifyEmail(user.id);
+
+                // Crear vinculación OAuth
+                await OAuthRepository.upsert({
+                    usuario_id: user.id,
+                    provider: 'google',
+                    provider_account_id: googleId,
+                    access_token: '',
+                    refresh_token: '',
+                    token_expires_at: new Date(Date.now() + 3600 * 1000),
+                    profile_data: {
+                        name: `${nombre} ${apellido}`,
+                        picture,
+                        email
+                    }
+                });
+
+                isNewUser = true;
+
+                // Log de registro
+                await AuthLogRepository.create({
+                    usuario_id: user.id,
+                    email: user.email,
+                    event_type: platform === 'mobile' ? 'oauth_register_mobile' : 'oauth_register_web',
+                    success: true,
+                    metadata: { provider: 'google', platform }
+                });
+            }
+        }
+
+        // Generar JWT tokens
+        const tokenPayload: TokenPayload = {
+            userId: user.id,
+            email: user.email,
+            rol: user.rol,
+            twoFactorEnabled: user.two_factor_enabled
+        };
+
+        const tokens = generateTokens(tokenPayload);
+
+        // Guardar refresh token
+        await RefreshTokenRepository.create({
+            usuario_id: user.id,
+            token: tokens.refreshToken,
+            expires_at: new Date(Date.now() + tokens.refreshTokenExpiresIn * 1000)
+        });
+
+        // Log de login exitoso
+        await AuthLogRepository.create({
+            usuario_id: user.id,
+            email: user.email,
+            event_type: platform === 'mobile' ? 'oauth_login_mobile' : 'oauth_login_web',
+            success: true,
+            metadata: { provider: 'google', platform }
+        });
+
+        // Actualizar último login
+        await UserRepository.resetFailedAttempts(user.id);
+
+        const { password_hash, ...userWithoutPassword } = user;
+
+        return {
+            user: userWithoutPassword,
+            tokens,
+            isNewUser
+        };
+    }
+
+    /**
      * Verificar Google ID Token (para apps móviles)
      * Recibe el ID token de Google Sign-In y retorna los datos del usuario
      */

@@ -157,25 +157,76 @@ function normalizeText(text: string): string {
 }
 
 function clasificarIntencion(texto: string): string {
-  const intenciones = {
-    consulta: ['como', 'que', 'donde', 'cuando', 'quien', 'cual'],
-    reporte: ['me', 'paso', 'tuve', 'choque', 'multa'],
-    ayuda: ['ayuda', 'necesito', 'quiero', 'puedo'],
-    informacion: ['informacion', 'saber', 'conocer', 'explica']
+  // Patrones más completos para preguntas naturales/coloquiales
+  const intenciones: { [key: string]: string[] } = {
+    consulta_multa: [
+      'multa', 'multaron', 'infraccion', 'infraccionar', 'boleta', 
+      'fotomulta', 'me pueden', 'pueden multarme', 'es infraccion'
+    ],
+    consulta_semaforo: [
+      'semaforo', 'semáforo', 'brinco', 'brinque', 'brincarse', 'brincar',
+      'luz roja', 'rojo', 'crucé', 'cruce', 'pase', 'pasé'
+    ],
+    consulta_accidente: [
+      'accidente', 'choque', 'chocaron', 'choqué', 'colision', 
+      'atropello', 'atropellé', 'golpe'
+    ],
+    consulta_alcohol: [
+      'alcohol', 'alcoholimetro', 'alcoholímetro', 'borracho', 'ebrio',
+      'tomado', 'copas', 'cerveza'
+    ],
+    consulta_estacionamiento: [
+      'estacionar', 'estacioné', 'banqueta', 'acera', 'doble fila',
+      'grua', 'corralon', 'llevaron'
+    ],
+    consulta_documentos: [
+      'licencia', 'tarjeta', 'circulacion', 'seguro', 'verificacion',
+      'documento', 'papeles', 'vencida', 'vencido'
+    ],
+    pregunta_consecuencia: [
+      'que pasa', 'qué pasa', 'que me pasa', 'qué me pasa',
+      'pueden', 'puedo', 'me pueden', 'pasaria', 'pasaría',
+      'consecuencia', 'sancion', 'castigo'
+    ],
+    queja: [
+      'injusto', 'abuso', 'mordida', 'extorsion', 'corrupcion',
+      'no es justo', 'no deberian'
+    ],
+    buscar_abogado: [
+      'abogado', 'profesional', 'asesor', 'experto', 'especialista',
+      'recomendacion', 'recomienda', 'ayuda legal'
+    ],
+    impugnar: [
+      'impugnar', 'pelear', 'recurso', 'queja', 'inconformar',
+      'no estoy de acuerdo', 'apelar'
+    ],
+    informacion: [
+      'informacion', 'saber', 'conocer', 'explica', 'como',
+      'donde', 'cuando', 'cuanto', 'cuál'
+    ],
+    ayuda: [
+      'ayuda', 'auxilio', 'emergencia', 'socorro', 'necesito'
+    ]
   };
 
-  let maxScore = 0;
-  let intencionDetectada = 'consulta';
+  const textoLower = texto.toLowerCase();
+  let mejorIntencion = 'informacion';
+  let mejorScore = 0;
 
-  for (const [intencion, palabras] of Object.entries(intenciones)) {
-    const score = palabras.filter(p => texto.includes(p)).length;
-    if (score > maxScore) {
-      maxScore = score;
-      intencionDetectada = intencion;
+  for (const [intencion, patrones] of Object.entries(intenciones)) {
+    let score = 0;
+    for (const patron of patrones) {
+      if (textoLower.includes(patron)) {
+        score++;
+      }
+    }
+    if (score > mejorScore) {
+      mejorScore = score;
+      mejorIntencion = intencion;
     }
   }
 
-  return intencionDetectada;
+  return mejorIntencion;
 }
 
 function extractKeywords(texto: string): string[] {

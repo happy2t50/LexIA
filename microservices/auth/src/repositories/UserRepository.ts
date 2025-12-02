@@ -104,7 +104,8 @@ export class UserRepository {
             return await this.findById(id);
         }
 
-        fields.push('updated_at = NOW()');
+        // No establecer updated_at aquí, ya que la columna puede no existir en la tabla `usuarios`.
+        // Si se requiere auditoría de actualizaciones, usar una columna existente o un trigger a futuro.
         values.push(id);
 
         const query = `
@@ -269,8 +270,7 @@ export class UserRepository {
     async updatePassword(userId: number, newPasswordHash: string): Promise<boolean> {
         const query = `
             UPDATE usuarios
-            SET password_hash = $1,
-                updated_at = NOW()
+            SET password_hash = $1
             WHERE id = $2
         `;
 
