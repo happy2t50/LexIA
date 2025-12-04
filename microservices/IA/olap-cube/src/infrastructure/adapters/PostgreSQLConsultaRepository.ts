@@ -186,6 +186,13 @@ export class PostgreSQLConsultaRepository implements IConsultaRepository {
     return result.rows.map(row => this.mapToEntity(row));
   }
 
+  async obtenerPorUsuario(usuarioId: string): Promise<ConsultaIncidente[]> {
+    const query = 'SELECT * FROM consultas WHERE usuario_id = $1 ORDER BY fecha_consulta DESC';
+    const result = await this.pool.query(query, [usuarioId]);
+
+    return result.rows.map(row => this.mapToEntity(row));
+  }
+
   async obtenerEstadisticasPorDimension(dimension: string): Promise<any> {
     const column = this.mapDimensionToColumn(dimension);
 

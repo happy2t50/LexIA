@@ -404,10 +404,27 @@ export class AdaptiveLearningService {
    * Mejora la detección de intención usando patrones aprendidos
    */
   mejorarDeteccionIntencion(mensaje: string, intencionOriginal: string): string {
+    // NO sobrescribir si ya detectamos un tema específico relevante
+    const temasNoSobrescribir = ['accidente', 'derechos', 'multa', 'documentos', 'impugnacion', 'alcohol', 'atropello'];
+    if (temasNoSobrescribir.includes(intencionOriginal)) {
+      return intencionOriginal;
+    }
+    
+    // NO sobrescribir a saludo si el mensaje tiene contenido real
+    const msgLower = mensaje.toLowerCase();
+    const palabrasContenido = ['licencia', 'renovar', 'multa', 'accidente', 'choque', 'policia', 'grua', 'donde', 'como', 'puedo', 'ayuda'];
+    const tieneContenido = palabrasContenido.some(p => msgLower.includes(p));
+    
     // Buscar si hay un patrón aprendido más exitoso
     const patronSimilar = this.buscarPatronSimilar(mensaje);
     
     if (patronSimilar && patronSimilar.respuestaExitosa && patronSimilar.frecuencia > 3) {
+      // No sobrescribir a social/saludo si el mensaje tiene contenido
+      if ((patronSimilar.intencionDetectada === 'social' || patronSimilar.intencionDetectada === 'saludo') && tieneContenido) {
+        console.log(`🧠 Ignorando patrón saludo porque mensaje tiene contenido real`);
+        return intencionOriginal;
+      }
+      
       // Si el patrón aprendido tiene alta frecuencia y fue exitoso, usarlo
       console.log(`🧠 Usando intención aprendida: ${patronSimilar.intencionDetectada} (frecuencia: ${patronSimilar.frecuencia})`);
       return patronSimilar.intencionDetectada;

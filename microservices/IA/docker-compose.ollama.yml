@@ -1,0 +1,56 @@
+# Docker Compose para Ollama + Preprocessor
+# Uso: docker-compose -f docker-compose.ollama.yml up -d
+
+version: '3.8'
+
+services:
+  # Servicio Ollama (Motor LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: lexia-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    networks:
+      - lexia-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Servicio Preprocessor (Normalización)
+  ollama-preprocessor:
+    build:
+      context: ./ollama-preprocessor
+      dockerfile: Dockerfile
+    container_name: lexia-ollama-preprocessor
+    ports:
+      - "3007:3007"
+    environment:
+      - PORT=3007
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2:1b
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - lexia-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  ollama_data:
+    driver: local
+
+networks:
+  lexia-network:
+    external: true

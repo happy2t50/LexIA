@@ -127,6 +127,10 @@ export class InMemoryConsultaRepository implements IConsultaRepository {
     return this.consultas.filter(c => c.clusterAsignado === cluster);
   }
 
+  async obtenerPorUsuario(usuarioId: string): Promise<ConsultaIncidente[]> {
+    return this.consultas.filter(c => c.usuarioId === usuarioId);
+  }
+
   async obtenerEstadisticasPorDimension(dimension: string): Promise<any> {
     const query: OLAPQuery = {
       dimensions: [dimension],

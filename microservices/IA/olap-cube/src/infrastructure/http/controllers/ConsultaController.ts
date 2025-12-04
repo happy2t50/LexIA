@@ -107,6 +107,16 @@ export class ConsultaController {
     }
   };
 
+  obtenerPorUsuario = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { usuarioId } = req.params;
+      const consultas = await this.consultaRepository.obtenerPorUsuario(usuarioId);
+      res.json(consultas);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   obtenerEstadisticas = async (req: Request, res: Response): Promise<void> => {
     try {
       const { dimension } = req.params;

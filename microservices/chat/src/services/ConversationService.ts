@@ -312,10 +312,15 @@ export class ConversationService {
   private async ensureUserExists(usuarioId: string, nombre?: string): Promise<void> {
     const exists = await this.pool.query(`SELECT 1 FROM usuarios WHERE id = $1 LIMIT 1`, [usuarioId]);
     if (exists.rows.length > 0) return;
-    // Insertar registro mínimo; otras columnas deben tener DEFAULT o permitir NULL
+    // Insertar registro mínimo con email generado para usuarios de prueba
+    const testEmail = `test-${usuarioId.substring(0, 8)}@lexia.test`;
+    // Separar nombre y apellido si viene con espacio, o usar 'Test' como apellido default
+    const nombreParts = (nombre || 'Usuario Test').split(' ');
+    const primerNombre = nombreParts[0];
+    const apellido = nombreParts.slice(1).join(' ') || 'Test';
     await this.pool.query(
-      `INSERT INTO usuarios (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
-      [usuarioId, nombre || 'Usuario']
+      `INSERT INTO usuarios (id, nombre, apellido, email) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+      [usuarioId, primerNombre, apellido, testEmail]
     );
   }
 }

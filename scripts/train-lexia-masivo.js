@@ -107,7 +107,7 @@ const VARIABLES = {
     "la patrulla", "los polis", "los azules", "los de la muni", "un verde",
     "los tombos", "la tira", "los cuicos", "un uniformado", "los guachos",
     "los de caminos", "protección civil", "los de fiscalización",
-    "un inspector", "los de la SSP", "los estatales", "la policía de caminos"
+    "un inspector", "los de la SSP", "los estatales", "la policía de caminos", "la chota"
   ],
   
   // Acciones de autoridad (incluyendo abusos comunes)
@@ -433,9 +433,9 @@ async function enviarLote(lote, stats) {
   const promesas = lote.map(item => {
     return axios.post(CONFIG.URL_API, {
       sessionId: uuidv4(),
-      usuarioId: 'entrenador-masivo-chiapas-01',
+      usuarioId: '00000000-0000-0000-0000-000000000001', // Usuario entrenador en DB
       mensaje: item.prompt,
-      nombre: 'Simulador Chiapas'
+      nombre: 'Entrenador LexIA'
     }, { timeout: 30000 })
     .then(response => {
       stats.exitosos++;

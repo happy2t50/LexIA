@@ -14,6 +14,10 @@ import { KnowledgeBaseService } from './services/KnowledgeBaseService';
 import { ResponseBuilder } from './services/ResponseBuilder';
 import { SmartResponseService } from './services/SmartResponseService';
 import { ForoService } from './services/ForoService';
+import { MensajesPrivadosService } from './services/MensajesPrivadosService';
+import { OLAPIntegrationService } from './services/OLAPIntegrationService';
+import { slangNormalizer } from './utils/SlangNormalizer';
+import { conversationStateMachine } from './services/ConversationStateMachine';
 
 // Tipos
 import { Sentimiento, Intencion, ArticuloRelevante } from './types';
@@ -77,6 +81,7 @@ const learningService = new LearningService(pool);
 const RAG_URL = process.env.RAG_SERVICE_URL || 'http://localhost:3009';
 const NLP_URL = process.env.NLP_SERVICE_URL || 'http://localhost:3004';
 const CLUSTERING_URL = process.env.CLUSTERING_SERVICE_URL || 'http://localhost:3002';
+const OLAP_URL = process.env.OLAP_SERVICE_URL || 'http://olap-cube:3001';
 
 // Servicio de Knowledge Base
 const knowledgeBaseService = new KnowledgeBaseService(pool, RAG_URL);
@@ -86,6 +91,12 @@ const smartResponseService = new SmartResponseService(pool, RAG_URL);
 
 // Servicio de foro de comunidad
 const foroService = new ForoService(pool);
+
+// Servicio de mensajes privados (1:1)
+const mensajesPrivadosService = new MensajesPrivadosService(pool);
+
+// Servicio de integración con OLAP Cube (Analytics y ML)
+const olapService = new OLAPIntegrationService(OLAP_URL);
 
 // ============================================================
 // ENDPOINTS
@@ -160,10 +171,22 @@ app.post('/message', async (req: Request, res: Response) => {
     const shortName = (nombre || 'Usuario').split(' ')[0];
 
     // ============================================================
-    // DETECTAR SI ES UN SALUDO
+    // DETECTAR SI ES UN SALUDO PURO (sin contenido real)
     // ============================================================
     const saludos = ['hola', 'hello', 'hi', 'buenos días', 'buenas tardes', 'buenas noches', 'hey', 'que tal', 'qué tal'];
-    const esSaludo = saludos.some(s => mensaje.toLowerCase().trim() === s || mensaje.toLowerCase().startsWith(s + ' '));
+    const msgLower = mensaje.toLowerCase().trim();
+    
+    // Palabras que indican que hay contenido real (NO es solo saludo)
+    const palabrasContenido = [
+      'licencia', 'renovar', 'multa', 'accidente', 'choque', 'policia', 'policía',
+      'grua', 'grúa', 'donde', 'dónde', 'como', 'cómo', 'puedo', 'necesito', 'ayuda',
+      'detuvieron', 'chocaron', 'atropello', 'derechos', 'documento', 'sabes', 'puedes'
+    ];
+    const tieneContenido = palabrasContenido.some(p => msgLower.includes(p));
+    
+    // Es saludo puro SOLO si: coincide con patrón de saludo, es corto (<20 chars), y NO tiene contenido
+    const coincideSaludo = saludos.some(s => msgLower === s || (msgLower.startsWith(s + ' ') && msgLower.length < 20));
+    const esSaludo = coincideSaludo && !tieneContenido;
     
     if (esSaludo) {
       const respuestaSaludo = smartResponseService.generarSaludo(shortName);
@@ -188,21 +211,126 @@ app.post('/message', async (req: Request, res: Response) => {
     }
 
     // ============================================================
-    // BUSCAR EN RAG (artículos legales de PDFs)
+    // NORMALIZAR SLANG A LENGUAJE LEGAL ("Traductor de Barrio")
+    // ============================================================
+    const mensajeNormalizado = slangNormalizer.normalize(mensaje);
+    const hasSlang = slangNormalizer.hasSlang(mensaje);
+
+    console.log(`🔄 Traductor de Barrio:`);
+    console.log(`   Original: "${mensaje}"`);
+    console.log(`   Normalizado: "${mensajeNormalizado}"`);
+    console.log(`   Contiene slang: ${hasSlang ? 'SÍ' : 'NO'}`);
+
+    // ============================================================
+    // PRE-DETECTAR TEMA PARA MÁQUINA DE ESTADOS
+    // ============================================================
+    const temaPreDetectado = smartResponseService.detectarTemaPreliminar(mensajeNormalizado);
+    console.log(`🎯 Tema pre-detectado: ${temaPreDetectado}`);
+
+    // ============================================================
+    // AGENTE INTERROGADOR - Verificar si necesitamos más información
+    // ============================================================
+    const interrogationResult = await conversationStateMachine.procesarMensaje(
+      sessionId,
+      mensaje,
+      temaPreDetectado
+    );
+
+    console.log(`🤔 Agente Interrogador:`);
+    console.log(`   Estado actual: ${interrogationResult.estadoActual}`);
+    console.log(`   Necesita más info: ${interrogationResult.necesitaMasInfo}`);
+    console.log(`   Puede consultar RAG: ${interrogationResult.puedeConsultarRAG}`);
+    if (interrogationResult.noEntendioRespuesta) {
+      console.log(`   ⚠️ No entendió la respuesta, intento ${interrogationResult.intentoActual}/${interrogationResult.maxIntentos}`);
+    }
+    if (interrogationResult.resumenContexto) {
+      console.log(`   Contexto: ${interrogationResult.resumenContexto}`);
+    }
+
+    // Si necesitamos más información, hacer la pregunta al usuario
+    if (interrogationResult.necesitaMasInfo && interrogationResult.siguientePregunta) {
+      
+      // SIEMPRE usar el formato "Javi, necesito un poco más de información para ayudarte mejor"
+      let preguntaFormateada = `${shortName}, necesito un poco más de información para ayudarte mejor:\n\n`;
+      
+      // Si no entendió la respuesta anterior, agregar aclaración
+      if (interrogationResult.noEntendioRespuesta) {
+        preguntaFormateada += `🤔 _No entendí tu respuesta anterior, déjame reformular:_\n\n`;
+      }
+      
+      preguntaFormateada += `❓ **${interrogationResult.siguientePregunta}**`;
+      
+      // Formatear opciones si las hay
+      let respuestaConOpciones = preguntaFormateada;
+      if (interrogationResult.opcionesSugeridas && interrogationResult.opcionesSugeridas.length > 0) {
+        respuestaConOpciones += '\n\n📌 **Opciones:**\n';
+        interrogationResult.opcionesSugeridas.forEach((opcion, i) => {
+          respuestaConOpciones += `${i + 1}. ${opcion}\n`;
+        });
+      }
+
+      // Guardar pregunta del sistema
+      await conversationService.saveMessage(
+        sessionId,
+        usuarioId,
+        'assistant',
+        respuestaConOpciones,
+        {
+          clusterDetectado: temaPreDetectado,
+          contexto: { 
+            source: 'interrogation',
+            estadoActual: interrogationResult.estadoActual,
+            esperandoRespuesta: true,
+            noEntendioRespuesta: interrogationResult.noEntendioRespuesta || false,
+            intentoActual: interrogationResult.intentoActual || 1
+          }
+        }
+      );
+
+      return res.json({
+        success: true,
+        mensaje: respuestaConOpciones,
+        articulos: [],
+        sugerencias: interrogationResult.opcionesSugeridas || [],
+        cluster: temaPreDetectado,
+        sessionId,
+        source: 'interrogation',
+        interrogando: true,
+        estadoInterrogacion: interrogationResult.estadoActual,
+        noEntendioRespuesta: interrogationResult.noEntendioRespuesta || false,
+        intentoActual: interrogationResult.intentoActual || 1
+      });
+    }
+
+    // ============================================================
+    // BUSCAR EN RAG (usando texto NORMALIZADO + contexto recopilado)
     // ============================================================
     let articulosLegales: any[] = [];
     let clusterDetectado = 'C1';
     
+    // Enriquecer query con contexto del interrogador
+    let queryParaRAG = mensajeNormalizado;
+    if (interrogationResult.resumenContexto) {
+      // Agregar palabras clave del contexto para mejorar búsqueda RAG
+      const contextoParts = interrogationResult.resumenContexto
+        .replace('📋 CONTEXTO RECOPILADO:', '')
+        .replace(/•/g, '')
+        .split('\n')
+        .filter(p => p.trim().length > 0)
+        .join(' ');
+      queryParaRAG = `${mensajeNormalizado} ${contextoParts}`;
+      console.log(`🔍 Query enriquecido para RAG: "${queryParaRAG.substring(0, 100)}..."`);
+    }
+    
     try {
       const ragResponse = await axios.post(`${RAG_URL}/search-smart`, {
-        query: mensaje,
+        query: queryParaRAG,
         usuarioId
       });
       
       clusterDetectado = ragResponse.data.clusterDetectado || 'C1';
       const chunksRecuperados = ragResponse.data.chunksRecuperados || [];
       
-      // Convertir chunks a artículos con información completa
       articulosLegales = chunksRecuperados
         .filter((chunk: any) => chunk.similitud >= 0.30)
         .map((chunk: any) => ({
@@ -245,37 +373,63 @@ app.post('/message', async (req: Request, res: Response) => {
       articulosLegales
     );
 
+    // Si tenemos contexto del interrogador, agregarlo al inicio de la respuesta
+    let respuestaFinal = resultado.respuesta;
+    if (interrogationResult.resumenContexto && interrogationResult.contextoCompleto) {
+      // Si hay contexto recopilado de las preguntas, mostrarlo como resumen
+      const contextoFormateado = `✅ **Entendido.** He anotado la siguiente información:\n${interrogationResult.resumenContexto}\n\n---\n\n`;
+      respuestaFinal = contextoFormateado + respuestaFinal;
+    }
+
     console.log(`📊 Respuesta generada:`);
     console.log(`   Tema: ${resultado.tema}`);
     console.log(`   Profesionistas ofrecidos: ${resultado.profesionistas?.length || 0}`);
     console.log(`   Anunciantes ofrecidos: ${resultado.anunciantes?.length || 0}`);
     console.log(`   Ofrecer match: ${resultado.ofrecerMatch}`);
     console.log(`   Ofrecer foro: ${resultado.ofrecerForo}`);
+    if (interrogationResult.contextoCompleto) {
+      console.log(`   Contexto del interrogador: ${Object.keys(interrogationResult.contextoCompleto.respuestasObtenidas).length} respuestas`);
+    }
 
     // Guardar respuesta del asistente
     await conversationService.saveMessage(
       sessionId,
       usuarioId,
       'assistant',
-      resultado.respuesta,
+      respuestaFinal,
       {
         clusterDetectado: resultado.tema,
         sentimiento,
         intencion,
-        contexto: { 
+        contexto: {
           source: 'smart_response',
           ragArticles: articulosLegales.length,
           profesionistasOfrecidos: resultado.profesionistas?.length || 0,
           anunciantesOfrecidos: resultado.anunciantes?.length || 0,
           ofrecerMatch: resultado.ofrecerMatch,
-          ofrecerForo: resultado.ofrecerForo
+          ofrecerForo: resultado.ofrecerForo,
+          contextoInterrogador: interrogationResult.contextoCompleto || null
         }
       }
     );
 
+    // ============================================================
+    // REGISTRAR EN OLAP CUBE para Analytics y ML
+    // ============================================================
+    await olapService.registrarConsulta({
+      textoConsulta: mensaje,
+      usuarioId: usuarioId,
+      intencion: intencion || 'informacion',
+      cluster: resultado.tema,
+      sentimiento: sentimiento,
+      articulosEncontrados: articulosLegales.length,
+      profesionistasRecomendados: resultado.profesionistas?.length || 0,
+      ubicacion: {} // Se puede obtener del perfil del usuario en futuras versiones
+    });
+
     return res.json({
       success: true,
-      mensaje: resultado.respuesta,
+      mensaje: respuestaFinal,
       articulos: articulosLegales,
       sugerencias: resultado.sugerencias,
       cluster: resultado.tema,
@@ -286,7 +440,8 @@ app.post('/message', async (req: Request, res: Response) => {
       profesionistas: resultado.profesionistas,
       anunciantes: resultado.anunciantes,
       ofrecerMatch: resultado.ofrecerMatch,
-      ofrecerForo: resultado.ofrecerForo
+      ofrecerForo: resultado.ofrecerForo,
+      contextoRecopilado: interrogationResult.contextoCompleto || null
     });
 
   } catch (error: any) {
@@ -852,6 +1007,140 @@ app.get('/foro/mis-publicaciones/:usuarioId', async (req: Request, res: Response
 });
 
 // ============================================================
+// MENSAJES PRIVADOS (1:1)
+// ============================================================
+
+// Obtener todas las conversaciones privadas del usuario
+app.get('/mensajes/conversaciones/:usuarioId', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId } = req.params;
+
+    const conversaciones = await mensajesPrivadosService.getConversaciones(usuarioId);
+
+    res.json({
+      success: true,
+      totalConversaciones: conversaciones.length,
+      conversaciones
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Obtener mensajes de una conversación específica
+app.get('/mensajes/:ciudadanoId/:abogadoId', async (req: Request, res: Response) => {
+  try {
+    const { ciudadanoId, abogadoId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 50;
+
+    const mensajes = await mensajesPrivadosService.getMensajes(ciudadanoId, abogadoId, limit);
+
+    res.json({
+      success: true,
+      totalMensajes: mensajes.length,
+      mensajes
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Enviar un mensaje privado
+app.post('/mensajes/enviar', async (req: Request, res: Response) => {
+  try {
+    const { ciudadanoId, abogadoId, remitenteId, contenido } = req.body;
+
+    if (!ciudadanoId || !abogadoId || !remitenteId || !contenido) {
+      return res.status(400).json({ 
+        error: 'ciudadanoId, abogadoId, remitenteId y contenido son requeridos' 
+      });
+    }
+
+    const mensaje = await mensajesPrivadosService.enviarMensaje(
+      ciudadanoId, 
+      abogadoId, 
+      remitenteId, 
+      contenido
+    );
+
+    res.json({
+      success: true,
+      mensaje
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Marcar mensajes como leídos
+app.post('/mensajes/marcar-leidos', async (req: Request, res: Response) => {
+  try {
+    const { ciudadanoId, abogadoId, lectorId } = req.body;
+
+    if (!ciudadanoId || !abogadoId || !lectorId) {
+      return res.status(400).json({ 
+        error: 'ciudadanoId, abogadoId y lectorId son requeridos' 
+      });
+    }
+
+    const marcados = await mensajesPrivadosService.marcarComoLeidos(
+      ciudadanoId, 
+      abogadoId, 
+      lectorId
+    );
+
+    res.json({
+      success: true,
+      mensajesMarcados: marcados
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Obtener cantidad de mensajes no leídos
+app.get('/mensajes/no-leidos/:usuarioId', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId } = req.params;
+
+    const noLeidos = await mensajesPrivadosService.getMensajesNoLeidos(usuarioId);
+
+    res.json({
+      success: true,
+      noLeidos
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Crear nueva conversación
+app.post('/mensajes/conversacion', async (req: Request, res: Response) => {
+  try {
+    const { ciudadanoId, abogadoId, mensajeInicial } = req.body;
+
+    if (!ciudadanoId || !abogadoId) {
+      return res.status(400).json({ 
+        error: 'ciudadanoId y abogadoId son requeridos' 
+      });
+    }
+
+    const conversacion = await mensajesPrivadosService.crearConversacion(
+      ciudadanoId, 
+      abogadoId, 
+      mensajeInicial
+    );
+
+    res.json({
+      success: true,
+      conversacion
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
@@ -861,6 +1150,7 @@ app.listen(PORT, () => {
   console.log(`🧠 Integrado con NLP: ${NLP_URL}`);
   console.log(`🎯 Integrado con Clustering: ${CLUSTERING_URL}`);
   console.log(`💬 Foro de comunidad habilitado`);
+  console.log(`📨 Chat privado 1:1 habilitado`);
 });
 
 process.on('SIGINT', async () => {

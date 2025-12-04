@@ -1,0 +1,36 @@
+{
+  "fecha": "2025-12-02T10:17:26.864Z",
+  "config": {
+    "TOTAL_MUESTRAS": 30000,
+    "URL_API": "http://localhost:3010/message",
+    "BATCH_SIZE": 50,
+    "DELAY_MS": 100
+  },
+  "resultados": {
+    "exitosos": 30000,
+    "fallidos": 0,
+    "tiempoSegundos": 1130.7,
+    "tasaExito": "100.00%"
+  },
+  "distribucionTemas": {
+    "unknown": 30000
+  },
+  "distribucionIntenciones": {
+    "consulta_muy_coloquial": 1850,
+    "duda_hipotetica": 1943,
+    "consulta_coloquial": 1788,
+    "consulta_plazo": 1924,
+    "tramite_documento": 1819,
+    "verificacion_monto": 1902,
+    "situacion_real": 1855,
+    "consulta_multiple": 1871,
+    "consulta_multa": 1825,
+    "impugnacion": 1937,
+    "reporte_abuso": 1838,
+    "emergencia": 1879,
+    "caso_complejo": 1861,
+    "consulta_corralon": 1842,
+    "accidente": 1892,
+    "derechos": 1876
+  }
+}

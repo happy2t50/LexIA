@@ -32,5 +32,6 @@ export interface IConsultaRepository {
   obtenerPorUbicacion(ciudad: string): Promise<ConsultaIncidente[]>;
   obtenerPorTiempo(fechaInicio: Date, fechaFin: Date): Promise<ConsultaIncidente[]>;
   obtenerPorCluster(cluster: string): Promise<ConsultaIncidente[]>;
+  obtenerPorUsuario(usuarioId: string): Promise<ConsultaIncidente[]>;
   obtenerEstadisticasPorDimension(dimension: string): Promise<any>;
 }

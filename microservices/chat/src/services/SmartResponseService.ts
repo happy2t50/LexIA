@@ -1,19 +1,8 @@
-/**
- * SERVICIO DE RESPUESTAS INTELIGENTES - LexIA
- * 
- * Sistema completo que genera respuestas con:
- * 1. Información legal basada en artículos reales (RAG)
- * 2. Pasos a seguir según el tema
- * 3. Recomendación de Top 10 profesionistas (ranking)
- * 4. Recomendación de anunciantes/servicios (grúas, talleres)
- * 5. Invitación al foro de comunidad
- * 6. Posibilidad de match 1-a-1 con profesionistas
- */
-
 import { Pool } from 'pg';
 import axios from 'axios';
 import { ForoInteligenteService, SugerenciaForo } from './ForoInteligenteService';
 import { AdaptiveLearningService } from './AdaptiveLearningService';
+import { slangNormalizer } from '../utils/SlangNormalizer';
 
 // Interfaces
 export interface ArticuloLegal {
@@ -56,6 +45,9 @@ export interface ConversationState {
   yaOfreceRecomendacion: boolean;
   yaOfreceForo: boolean;
   yaOfreceAnunciantes: boolean;
+  // Rastrear por tema para no repetir en el mismo tema
+  temasConProfesionistasOfrecidos: string[];
+  temasConAnunciantesOfrecidos: string[];
 }
 
 // Configuración por tema
@@ -65,6 +57,24 @@ const TEMA_CONFIG: { [key: string]: {
   serviciosAnunciante: string[];
   preguntasSugeridas: string[];
 }} = {
+  'fuga_autoridad': {
+    pasosASeguir: [
+      '⚠️ URGENTE: Si aún no te han identificado, consulta con un abogado ANTES de actuar',
+      'NO intentes huir de nuevo - esto agrava la situación considerablemente',
+      'Reúne toda la evidencia del momento (hora, lugar, motivo de la detención)',
+      'Si tienes dashcam o video, guárdalo - puede ser evidencia importante',
+      'Busca asesoría legal especializada en derecho penal de tránsito',
+      'Si te localizan, coopera completamente con las autoridades'
+    ],
+    especialidadesAbogado: ['Derecho penal', 'Defensa penal', 'Infracciones graves de tránsito'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Qué consecuencias tiene huir de un operativo?',
+      '¿Pueden rastrearme por las placas?',
+      '¿Debería presentarme voluntariamente?',
+      '¿Necesito un abogado penalista?'
+    ]
+  },
   'semaforo': {
     pasosASeguir: [
       'Si te pusieron una multa, revisa que los datos de la boleta sean correctos',
@@ -107,8 +117,8 @@ const TEMA_CONFIG: { [key: string]: {
       'Si no estás de acuerdo, puedes impugnar en Juzgado Cívico',
       'Guarda el comprobante de pago'
     ],
-    especialidadesAbogado: ['Infracciones de tránsito', 'Derecho administrativo'],
-    serviciosAnunciante: [],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Multas', 'Derecho administrativo'],
+    serviciosAnunciante: ['Gestoria'],
     preguntasSugeridas: [
       '¿Cómo impugno esta multa?',
       '¿Dónde pago la multa?',
@@ -130,6 +140,25 @@ const TEMA_CONFIG: { [key: string]: {
       '¿Puedo recuperar mi licencia?',
       '¿Cuánto tiempo estará suspendida?',
       '¿Qué derechos tengo durante el operativo?'
+    ]
+  },
+  'alcoholemia': {
+    pasosASeguir: [
+      'Coopera con las autoridades, no te resistas',
+      'Tienes derecho a que el alcoholímetro esté calibrado',
+      'Puedes solicitar una segunda prueba',
+      'Si te arrestan, tienes derecho a una llamada',
+      'Paga la multa para recuperar tu vehículo del corralón',
+      'Si te quitaron la licencia, pregunta por el trámite de recuperación',
+      'Considera tomar un curso de sensibilización'
+    ],
+    especialidadesAbogado: ['Defensa penal', 'Alcoholimetría', 'Infracciones de tránsito'],
+    serviciosAnunciante: ['Grua'],
+    preguntasSugeridas: [
+      '¿Puedo recuperar mi licencia?',
+      '¿Cuánto tiempo estará suspendida?',
+      '¿Qué derechos tengo durante el operativo?',
+      '¿Cómo saco mi carro del corralón?'
     ]
   },
   'documentos': {
@@ -156,8 +185,8 @@ const TEMA_CONFIG: { [key: string]: {
       'Paga grúa y pensión diaria',
       'Revisa tu vehículo antes de retirarlo'
     ],
-    especialidadesAbogado: ['Infracciones de tránsito', 'Derecho administrativo'],
-    serviciosAnunciante: ['Grua'],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Multas', 'Derecho administrativo'],
+    serviciosAnunciante: ['Grua', 'Gestoria'],
     preguntasSugeridas: [
       '¿Cuánto cuesta el corralón por día?',
       '¿Puedo impugnar si la señalización era confusa?',
@@ -207,8 +236,8 @@ const TEMA_CONFIG: { [key: string]: {
       'Puedes solicitar que un perito revise la zona',
       'Espera la resolución (usualmente 15-30 días)'
     ],
-    especialidadesAbogado: ['Impugnación de multas', 'Derecho administrativo', 'Infracciones de tránsito'],
-    serviciosAnunciante: [],
+    especialidadesAbogado: ['Impugnación de multas', 'Multas', 'Derecho administrativo', 'Infracciones de tránsito'],
+    serviciosAnunciante: ['Gestoria'],
     preguntasSugeridas: [
       '¿Qué evidencia necesito para impugnar?',
       '¿Cuánto tiempo tengo para impugnar?',
@@ -227,6 +256,369 @@ const TEMA_CONFIG: { [key: string]: {
       '¿Cuáles son mis derechos como conductor?',
       '¿Qué documentos debo llevar siempre?',
       '¿Cómo funciona el sistema de puntos?'
+    ]
+  },
+  // === ESCENARIOS ADICIONALES DE TRÁNSITO ===
+  'exceso_velocidad': {
+    pasosASeguir: [
+      'Revisa la boleta: debe indicar velocidad detectada y límite permitido',
+      'Si fue radar/fotomulta, tienes 15 días para impugnar con evidencia',
+      'Verifica que el equipo de medición tenga calibración vigente',
+      'Paga con descuento del 50% en los primeros 15 días si decides no impugnar',
+      'Consulta cuántos puntos te restaron (generalmente 3-6 puntos)'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Derecho administrativo', 'Impugnación de multas'],
+    serviciosAnunciante: ['Gestoria'],
+    preguntasSugeridas: [
+      '¿Puedo impugnar si el radar no estaba calibrado?',
+      '¿Cuántos puntos me quitan por exceso de velocidad?',
+      '¿Dónde pago la multa?'
+    ]
+  },
+  'vuelta_prohibida': {
+    pasosASeguir: [
+      'Verifica si había señalización clara de vuelta prohibida',
+      'Revisa la boleta de infracción - debe especificar el lugar exacto',
+      'Si la señalización era confusa o inexistente, puedes impugnar',
+      'Toma fotos del lugar si planeas impugnar',
+      'Tienes 15 días hábiles para presentar recurso'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Impugnación de multas'],
+    serviciosAnunciante: ['Gestoria'],
+    preguntasSugeridas: [
+      '¿Puedo impugnar si no había señal clara?',
+      '¿Cuánto es la multa por vuelta prohibida?',
+      '¿Qué evidencia necesito para impugnar?'
+    ]
+  },
+  'sentido_contrario': {
+    pasosASeguir: [
+      'Esta es una infracción GRAVE - puede incluir puntos y multa alta',
+      'Si causaste accidente, hay responsabilidad civil y posiblemente penal',
+      'Documenta las circunstancias (señalización, visibilidad)',
+      'Si fue por señalización confusa, reúne evidencia fotográfica',
+      'Considera asesoría legal si hubo consecuencias graves'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Defensa penal', 'Responsabilidad civil'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Qué consecuencias tiene circular en sentido contrario?',
+      '¿Puedo impugnar si la señalización era confusa?',
+      '¿Qué pasa si causé un accidente?'
+    ]
+  },
+  'uso_celular': {
+    pasosASeguir: [
+      'La multa por usar celular al conducir es de 10-20 días de salario mínimo',
+      'Si te grabaron o fotografiaron, será difícil impugnar',
+      'Revisa que la boleta tenga todos los datos correctos',
+      'Si decides impugnar, necesitas evidencia de que NO estabas usando el celular',
+      'Paga con 50% de descuento en los primeros 15 días'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Derecho administrativo'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Puedo impugnar si solo estaba cambiando música?',
+      '¿Cuántos puntos me quitan?',
+      '¿El manos libres está permitido?'
+    ]
+  },
+  'cinturon_seguridad': {
+    pasosASeguir: [
+      'La multa por no usar cinturón es de aproximadamente 5-10 días de salario mínimo',
+      'Si todos los ocupantes no lo usaban, puede haber una multa por cada uno',
+      'Verifica que la boleta tenga los datos correctos',
+      'Esta infracción es difícil de impugnar salvo errores en la boleta',
+      'Paga con descuento en los primeros 15 días'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Es obligatorio para pasajeros traseros?',
+      '¿Aplica para embarazadas?',
+      '¿Cuánto es la multa exacta?'
+    ]
+  },
+  'seguro_vencido': {
+    pasosASeguir: [
+      'Circular sin seguro vigente es infracción GRAVE',
+      'Tu vehículo puede ser retenido hasta que presentes póliza vigente',
+      'Si tuviste accidente sin seguro, eres responsable de TODOS los daños',
+      'Renueva tu seguro lo antes posible - hay opciones desde $3,000 anuales',
+      'Algunos estados requieren seguro de responsabilidad civil obligatorio'
+    ],
+    especialidadesAbogado: ['Seguros', 'Responsabilidad civil', 'Infracciones de tránsito'],
+    serviciosAnunciante: ['Aseguradora'],
+    preguntasSugeridas: [
+      '¿Qué pasa si tuve accidente sin seguro?',
+      '¿Cuál es el seguro mínimo obligatorio?',
+      '¿Dónde contrato un seguro económico?'
+    ]
+  },
+  'verificacion_vencida': {
+    pasosASeguir: [
+      'Verifica tu último holograma y la fecha de vencimiento',
+      'Agenda cita en un centro de verificación autorizado',
+      'Si tu vehículo no pasa, tienes plazo para repararlo y reintentar',
+      'La multa por verificación vencida es de aproximadamente 20 días de salario mínimo',
+      'Algunos estados tienen programas de prórroga - consulta si aplica'
+    ],
+    especialidadesAbogado: ['Trámites vehiculares', 'Derecho administrativo'],
+    serviciosAnunciante: ['Taller mecanico'],
+    preguntasSugeridas: [
+      '¿Dónde verifico mi auto?',
+      '¿Qué pasa si no paso la verificación?',
+      '¿Puedo circular con verificación vencida?'
+    ]
+  },
+  'licencia_vencida': {
+    pasosASeguir: [
+      'Circular con licencia vencida es infracción que puede resultar en retención del vehículo',
+      'Agenda cita en Secretaría de Movilidad para renovación',
+      'Requisitos: INE, comprobante de domicilio, licencia anterior, examen de la vista',
+      'El costo de renovación varía por tipo de licencia ($500-$1,500 aproximadamente)',
+      'No manejes hasta renovar - si te detienen, el auto va al corralón'
+    ],
+    especialidadesAbogado: ['Trámites vehiculares', 'Derecho administrativo'],
+    serviciosAnunciante: ['Gestoria'],
+    preguntasSugeridas: [
+      '¿Dónde renuevo mi licencia?',
+      '¿Qué documentos necesito?',
+      '¿Puedo manejar con licencia vencida mientras tramito?'
+    ]
+  },
+  'placas_vencidas': {
+    pasosASeguir: [
+      'Revisa la fecha de vencimiento en tu tarjeta de circulación',
+      'Agenda cita para reemplacamiento en Secretaría de Movilidad',
+      'Requisitos: factura, INE, comprobante de domicilio, último pago de tenencia',
+      'El costo incluye placas nuevas, tarjeta de circulación y holograma',
+      'Mientras tanto, evita circular para no arriesgarte a multa o corralón'
+    ],
+    especialidadesAbogado: ['Trámites vehiculares', 'Derecho administrativo'],
+    serviciosAnunciante: ['Gestoria'],
+    preguntasSugeridas: [
+      '¿Cada cuántos años debo cambiar placas?',
+      '¿Qué documentos necesito para reemplacar?',
+      '¿Puedo circular con placas vencidas?'
+    ]
+  },
+  'tenencia_adeudo': {
+    pasosASeguir: [
+      'Consulta tu adeudo en el portal de la Secretaría de Finanzas de tu estado',
+      'Puedes pagar en línea, banco o en las oficinas de recaudación',
+      'Si tienes varios años de adeudo, pregunta por programas de condonación',
+      'Sin pago de tenencia no puedes hacer reemplacamiento ni verificación',
+      'El adeudo de tenencia puede generar recargos mensuales'
+    ],
+    especialidadesAbogado: ['Derecho fiscal', 'Trámites vehiculares'],
+    serviciosAnunciante: ['Gestoria'],
+    preguntasSugeridas: [
+      '¿Dónde consulto mi adeudo de tenencia?',
+      '¿Hay programas de descuento por adeudos?',
+      '¿Qué pasa si no pago la tenencia?'
+    ]
+  },
+  'retencion_vehiculo': {
+    pasosASeguir: [
+      'Pide al oficial el motivo exacto de la retención y número de folio',
+      'Anota ubicación del corralón donde llevarán tu vehículo',
+      'Reúne documentos: INE, tarjeta de circulación, comprobante de propiedad',
+      'Paga la multa correspondiente en banco o en línea',
+      'Acude al corralón con comprobante de pago y documentos para liberar'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Derecho administrativo'],
+    serviciosAnunciante: ['Grua', 'Gestoria'],
+    preguntasSugeridas: [
+      '¿Cuánto cuesta el corralón por día?',
+      '¿Qué documentos necesito para sacar mi auto?',
+      '¿Pueden retener mi auto sin darme boleta?'
+    ]
+  },
+  'choque_estacionado': {
+    pasosASeguir: [
+      'Si el responsable huyó, toma fotos de los daños inmediatamente',
+      'Busca testigos o cámaras de seguridad cercanas',
+      'Levanta denuncia en Ministerio Público (tienes 72 horas)',
+      'Reporta a tu seguro - algunos cubren daños de terceros no identificados',
+      'Revisa si hay fragmentos del otro vehículo (pueden ayudar a identificarlo)'
+    ],
+    especialidadesAbogado: ['Accidentes de tránsito', 'Responsabilidad civil', 'Seguros'],
+    serviciosAnunciante: ['Taller', 'Ajustador'],
+    preguntasSugeridas: [
+      '¿Cómo denuncio si no sé quién me chocó?',
+      '¿Mi seguro cubre si el otro huyó?',
+      '¿Qué hago si no hay testigos?'
+    ]
+  },
+  'lesiones_accidente': {
+    pasosASeguir: [
+      '⚠️ URGENTE: Llama al 911 inmediatamente si hay heridos',
+      'NO muevas a los heridos a menos que haya peligro inminente (fuego, etc.)',
+      'El accidente con lesionados REQUIERE Ministerio Público',
+      'Tu seguro debe cubrir gastos médicos del tercero (si tienes cobertura amplia)',
+      'Busca asesoría legal - puede haber cargos penales por lesiones culposas',
+      'Documenta todo: fotos, testigos, reporte médico'
+    ],
+    especialidadesAbogado: ['Defensa penal', 'Responsabilidad civil', 'Accidentes con lesionados'],
+    serviciosAnunciante: ['Ajustador'],
+    preguntasSugeridas: [
+      '¿Qué pasa si el herido demanda?',
+      '¿Mi seguro cubre los gastos médicos?',
+      '¿Puedo ir a la cárcel por un accidente con heridos?'
+    ]
+  },
+  'homicidio_culposo': {
+    pasosASeguir: [
+      '⚠️ SITUACIÓN MUY GRAVE: Contacta un abogado penalista INMEDIATAMENTE',
+      'NO hagas declaraciones sin tu abogado presente',
+      'El homicidio culposo por accidente de tránsito tiene pena de 2-7 años de prisión',
+      'Tu seguro puede cubrir la reparación del daño (indemnización a la familia)',
+      'La reparación del daño puede reducir la pena considerablemente',
+      'Coopera con las autoridades pero siempre con asesoría legal'
+    ],
+    especialidadesAbogado: ['Defensa penal', 'Homicidio culposo', 'Derecho penal'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Puedo evitar la cárcel?',
+      '¿Qué es la reparación del daño?',
+      '¿Cuánto tiempo de prisión puedo enfrentar?'
+    ]
+  },
+  'mordida_corrupcion': {
+    pasosASeguir: [
+      'NUNCA pagues directamente al oficial - es delito para ambos',
+      'Pide su identificación y número de placa',
+      'Solicita la boleta oficial de infracción',
+      'Puedes grabar la interacción (es legal en vía pública)',
+      'Denuncia al 089 o en la Contraloría Municipal',
+      'Si ya pagaste, aún puedes denunciar con fecha, hora y descripción del oficial'
+    ],
+    especialidadesAbogado: ['Derechos humanos', 'Derecho administrativo', 'Anticorrupción'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Dónde denuncio a un oficial corrupto?',
+      '¿Es legal grabar a un policía?',
+      '¿Qué hago si me amenazan por no pagar?'
+    ]
+  },
+  'retiro_llaves': {
+    pasosASeguir: [
+      'El oficial NO tiene derecho a quitarte las llaves del vehículo',
+      'Pide su identificación y número de placa',
+      'Graba la interacción si es posible',
+      'Llama al 089 para reportar el abuso',
+      'Solo pueden retirar tu vehículo con grúa oficial si hay infracción grave',
+      'Denuncia en la Contraloría o Comisión de Derechos Humanos'
+    ],
+    especialidadesAbogado: ['Derechos humanos', 'Abuso de autoridad'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Pueden quitarme las llaves?',
+      '¿Dónde denuncio abuso de autoridad?',
+      '¿Qué hago si no me devuelven las llaves?'
+    ]
+  },
+  'operativo_alcoholimetro': {
+    pasosASeguir: [
+      'Coopera con el operativo - negarte agrava tu situación',
+      'Tienes derecho a ver que el alcoholímetro esté calibrado',
+      'El límite legal es 0.4 g/L en sangre (aproximadamente 2 cervezas)',
+      'Si das positivo: multa + arresto 20-36 horas + vehículo al corralón',
+      'Puedes solicitar una segunda prueba',
+      'Si te niegas a la prueba, se presume positivo'
+    ],
+    especialidadesAbogado: ['Defensa penal', 'Alcoholimetría', 'Infracciones de tránsito'],
+    serviciosAnunciante: ['Grua'],
+    preguntasSugeridas: [
+      '¿Puedo negarme a soplar?',
+      '¿Cuánto alcohol puedo tener legalmente?',
+      '¿Qué pasa si doy positivo?'
+    ]
+  },
+  'daño_propiedad': {
+    pasosASeguir: [
+      'Si chocaste contra propiedad privada (casa, negocio), debes reportarlo',
+      'Toma fotos de los daños causados',
+      'Intercambia datos con el propietario',
+      'Reporta a tu seguro si tienes cobertura de daños a terceros',
+      'Llega a un acuerdo o espera la valoración del daño',
+      'Si huyes, cometes delito de daño en propiedad ajena'
+    ],
+    especialidadesAbogado: ['Responsabilidad civil', 'Seguros', 'Daños y perjuicios'],
+    serviciosAnunciante: ['Ajustador', 'Taller'],
+    preguntasSugeridas: [
+      '¿Mi seguro cubre daños a propiedad?',
+      '¿Qué pasa si no puedo pagar el daño?',
+      '¿Puedo ir a la cárcel por dañar propiedad?'
+    ]
+  },
+  'transporte_publico': {
+    pasosASeguir: [
+      'Si tuviste accidente en transporte público, documenta todo',
+      'Toma foto de la placa, número económico y ruta',
+      'Pide datos del conductor y de la empresa concesionaria',
+      'La empresa de transporte tiene seguro obligatorio para pasajeros',
+      'Puedes demandar a la empresa y al conductor por negligencia',
+      'Acude al Ministerio Público si hay lesiones'
+    ],
+    especialidadesAbogado: ['Responsabilidad civil', 'Accidentes de tránsito', 'Daños y perjuicios'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Puedo demandar al chofer del camión?',
+      '¿La empresa de transporte tiene seguro?',
+      '¿Cómo reclamo indemnización?'
+    ]
+  },
+  'motocicleta': {
+    pasosASeguir: [
+      'El casco es OBLIGATORIO - sin casco la multa es de 10-20 días de salario',
+      'Debes circular por carril derecho (excepto para rebasar)',
+      'Está prohibido circular entre carriles (lane splitting)',
+      'Se requiere licencia tipo A específica para motocicleta',
+      'El seguro de responsabilidad civil es obligatorio',
+      'En accidente, el motociclista tiene los mismos derechos que un automovilista'
+    ],
+    especialidadesAbogado: ['Infracciones de tránsito', 'Accidentes de motocicleta'],
+    serviciosAnunciante: ['Grua', 'Taller'],
+    preguntasSugeridas: [
+      '¿Qué licencia necesito para moto?',
+      '¿Puedo circular entre carriles?',
+      '¿Qué pasa si me accidento en moto?'
+    ]
+  },
+  'bicicleta': {
+    pasosASeguir: [
+      'Los ciclistas tienen los mismos derechos que los vehículos motorizados',
+      'Debes circular por ciclovía cuando exista, o por carril derecho',
+      'Es obligatorio usar casco y luces/reflejantes de noche',
+      'Si te atropellan, el conductor motorizado tiene mayor responsabilidad',
+      'Puedes demandar daños si un auto te lesiona',
+      'Toma fotos, busca testigos y denuncia en MP si hay lesiones'
+    ],
+    especialidadesAbogado: ['Accidentes de tránsito', 'Responsabilidad civil', 'Derechos del ciclista'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Qué derechos tengo como ciclista?',
+      '¿Puedo demandar si me atropellan?',
+      '¿Es obligatorio usar casco en bici?'
+    ]
+  },
+  'taxi_uber_didi': {
+    pasosASeguir: [
+      'Si tuviste accidente en Uber/Didi, documenta todo en la app',
+      'Toma fotos del vehículo, conductor y daños',
+      'La plataforma tiene seguro que cubre accidentes durante viajes',
+      'Puedes reclamar a través de la app o directamente con la aseguradora',
+      'Si hay lesiones graves, acude al Ministerio Público',
+      'Guarda el historial del viaje en la aplicación como evidencia'
+    ],
+    especialidadesAbogado: ['Accidentes de tránsito', 'Responsabilidad civil', 'Derechos del consumidor'],
+    serviciosAnunciante: [],
+    preguntasSugeridas: [
+      '¿Uber/Didi tiene seguro para pasajeros?',
+      '¿Cómo reclamo si tuve accidente en Uber?',
+      '¿Puedo demandar al conductor y a la plataforma?'
     ]
   },
   // === NUEVAS CATEGORÍAS ===
@@ -309,8 +701,21 @@ export class SmartResponseService {
     
     // === PRIORIDAD 0.5: Detectar Saludos/Social ===
     const socialPatterns = ['hola', 'buenos dias', 'buenas tardes', 'buenas noches', 'qué tal', 'como estas', 'gracias por', 'muchas gracias', 'adios', 'bye', 'hasta luego'];
-    const esSoloSaludo = socialPatterns.some(p => msgLower.includes(p)) && msgLower.length < 25;
-    const noTienePregunta = !msgLower.includes('que hago') && !msgLower.includes('qué hago') && !msgLower.includes('como') && !msgLower.includes('cómo');
+    // Palabras que indican que NO es solo saludo - EXTENDIDA
+    const palabrasContenido = [
+      'accidente', 'choque', 'multa', 'licencia', 'policia', 'policía', 'chota', 
+      'grua', 'grúa', 'detuvieron', 'ayuda', 'derechos', 'problema', 'denuncia',
+      'renovar', 'renuevo', 'renovacion', 'sacar', 'tramite', 'trámite', 'donde',
+      'dónde', 'como', 'cómo', 'puedo', 'necesito', 'quiero', 'tengo', 'me',
+      'documento', 'papeles', 'seguro', 'verificacion', 'tarjeta', 'placas',
+      'chocaron', 'atropello', 'alcohol', 'borracho', 'mordida', 'corrupcion',
+      'infraccion', 'boleta', 'pagar', 'impugnar', 'corralon', 'estacionamiento'
+    ];
+    const tieneContenido = palabrasContenido.some(p => msgLower.includes(p));
+    // Solo es saludo puro si: coincide con patron social, es muy corto, y NO tiene contenido
+    const coincideSocial = socialPatterns.some(p => msgLower.includes(p));
+    const esSoloSaludo = coincideSocial && msgLower.length < 25 && !tieneContenido;
+    const noTienePregunta = !msgLower.includes('que hago') && !msgLower.includes('qué hago') && !msgLower.includes('como') && !msgLower.includes('cómo') && !msgLower.includes('donde') && !msgLower.includes('dónde') && !msgLower.includes('sabes') && !msgLower.includes('puedo') && !msgLower.includes('puedes');
     if (esSoloSaludo && noTienePregunta) {
       return {
         tema: 'social',
@@ -318,6 +723,51 @@ export class SmartResponseService {
         esOffTopic: false,
         necesitaClarificacion: false
       };
+    }
+
+    // === PRIORIDAD 0.8: FUGA DE AUTORIDAD / EVASIÓN ===
+    // Detectar cuando alguien huyó de un agente de tránsito
+    const fugaAutoridadPatterns = [
+      // Patrones directos de fuga
+      'me fui a la fuga', 'me di a la fuga', 'hui', 'huí', 'huir', 
+      'me escape', 'me escapé', 'escape del', 'escapé del',
+      'no pare', 'no paré', 'no me detuve', 'no me pare', 'no me paré',
+      'segui de largo', 'seguí de largo', 'segui manejando', 'seguí manejando',
+      'acelere', 'aceleré', 'le acelere', 'le aceleré',
+      'me pele', 'me pelé', 'me fui', 'sali corriendo', 'salí corriendo',
+      // Contexto de señal de alto ignorada
+      'torreta', 'sirena', 'señal de alto', 'alto y no pare',
+      'me pidio que parara', 'me pidió que parara', 'me hizo la seña',
+      'me sono la torreta', 'me sonó la torreta', 'prendio las torretas',
+      'prendió las torretas', 'encendio las luces', 'encendió las luces',
+      // Slang/coloquial
+      'le saque la vuelta', 'le saqué la vuelta', 'me le pele', 'me le pelé',
+      'no le hice caso', 'lo ignore', 'lo ignoré', 'evadi', 'evadí'
+    ];
+    
+    // Contexto de autoridad de tránsito
+    const contextoAutoridad = [
+      'agente', 'oficial', 'transito', 'tránsito', 'policia', 'policía',
+      'patrulla', 'operativo', 'reten', 'retén'
+    ];
+    
+    const tieneFugaPattern = fugaAutoridadPatterns.some(p => msgLower.includes(p));
+    const tieneContextoAutoridad = contextoAutoridad.some(p => msgLower.includes(p));
+    
+    // Si menciona fuga Y contexto de autoridad = muy alta confianza
+    if (tieneFugaPattern && tieneContextoAutoridad) {
+      matchCount = fugaAutoridadPatterns.filter(p => msgLower.includes(p)).length;
+      confianza = Math.min(0.98, 0.75 + (matchCount * 0.08));
+      return { tema: 'fuga_autoridad', confianza, esOffTopic: false, necesitaClarificacion: false };
+    }
+    
+    // Si solo menciona fuga pero con suficientes indicadores
+    if (tieneFugaPattern) {
+      matchCount = fugaAutoridadPatterns.filter(p => msgLower.includes(p)).length;
+      if (matchCount >= 2 || msgLower.includes('torreta') || msgLower.includes('sirena')) {
+        confianza = Math.min(0.9, 0.6 + (matchCount * 0.1));
+        return { tema: 'fuga_autoridad', confianza, esOffTopic: false, necesitaClarificacion: confianza < 0.7 };
+      }
     }
 
     // === PRIORIDAD 1: Detectar impugnación/queja ===
@@ -348,6 +798,40 @@ export class SmartResponseService {
       return { tema: 'impugnacion', confianza: 0.9, esOffTopic: false, necesitaClarificacion: false };
     }
     
+    // === PRIORIDAD 1.5: ALCOHOLEMIA / DUI (antes de derechos) ===
+    // Detectar PRIMERO si es caso de alcohol para evitar que "detuvieron" lo capture como "derechos"
+    const alcoholemiaPatterns = [
+      'alcohol', 'borracho', 'ebrio', 'ebriedad', 'alcoholimetro', 'alcoholímetro',
+      'tomado', 'tomada', 'cerveza', 'copa', 'copas', 'toxico', 'tóxico',
+      'operativo', 'soplar', 'sople', 'soplé', 'prueba de alcohol',
+      'manejando tomado', 'manejando borracho', 'manejando ebrio',
+      'estado de ebriedad', 'aliento', 'pedote', 'pedo', 'bien pedo',
+      'crudo', 'resaca', 'alcoholizado', 'nivel de alcohol',
+      'positivo', 'dio positivo', 'dieron positivo', 'arriba del limite',
+      'arriba del límite', 'limite de alcohol', 'límite de alcohol'
+    ];
+    
+    const contextoManejo = ['manejando', 'conduciendo', 'volante', 'carro', 'auto', 'coche', 'vehiculo', 'vehículo', 'troca', 'nave'];
+    
+    const tieneAlcoholPattern = alcoholemiaPatterns.some(p => msgLower.includes(p));
+    const tieneContextoManejo = contextoManejo.some(p => msgLower.includes(p));
+    
+    // Si menciona alcohol + contexto de manejo = muy alta confianza para alcoholemia
+    if (tieneAlcoholPattern && tieneContextoManejo) {
+      matchCount = alcoholemiaPatterns.filter(p => msgLower.includes(p)).length;
+      confianza = Math.min(0.98, 0.7 + (matchCount * 0.08));
+      return { tema: 'alcoholemia', confianza, esOffTopic: false, necesitaClarificacion: false };
+    }
+    
+    // Si solo menciona alcohol con suficientes indicadores
+    if (tieneAlcoholPattern) {
+      matchCount = alcoholemiaPatterns.filter(p => msgLower.includes(p)).length;
+      if (matchCount >= 2 || msgLower.includes('operativo') || msgLower.includes('alcoholimetro') || msgLower.includes('soplar')) {
+        confianza = Math.min(0.95, 0.6 + (matchCount * 0.1));
+        return { tema: 'alcoholemia', confianza, esOffTopic: false, necesitaClarificacion: confianza < 0.7 };
+      }
+    }
+
     // === PRIORIDAD 2: DERECHOS (reforzado) ===
     const derechosPatterns = [
       'derecho', 'derechos', 'abuso', 'abusaron', 'policia', 'policía', 'estatal',
@@ -360,7 +844,10 @@ export class SmartResponseService {
       'transito me para', 'tránsito me para', 'transito me paro', 'tránsito me paró',
       'si me para', 'si me paran', 'cuando me para', 'cuando me paran',
       'me detiene', 'me detuvo', 'detiene un oficial', 'detuvo un oficial',
-      'agente me', 'oficial de transito', 'oficial de tránsito', 'agente de transito'
+      'agente me', 'oficial de transito', 'oficial de tránsito', 'agente de transito',
+      // Slang mexicano para policía
+      'chota', 'la chota', 'la tira', 'la julia', 'puerco', 'marrano', 'cuico',
+      'me paro la chota', 'me detuvo la chota', 'la chota me', 'los polis'
     ];
     matchCount = derechosPatterns.filter(p => msgLower.includes(p)).length;
     if (matchCount >= 1) {
@@ -373,9 +860,15 @@ export class SmartResponseService {
     // === PRIORIDAD 3: Otros temas específicos ===
     const temaPatterns: { [key: string]: { patterns: string[], peso: number } } = {
       'semaforo': { patterns: ['semaforo', 'semáforo', 'brinco', 'brinque', 'brincar', 'luz roja', 'pase el rojo', 'pasé el rojo', 'alto'], peso: 0.15 },
-      'accidente': { patterns: ['accidente', 'choque', 'chocaron', 'chocar', 'colision', 'colisión', 'golpe', 'impacto', 'volcadura', 'choqué'], peso: 0.15 },
-      'atropello': { patterns: ['atropello', 'atropellado', 'atropellar', 'peaton', 'peatón', 'caminando', 'fuga', 'huyo', 'huyó', 'huir', 'escapó'], peso: 0.18 },
-      'alcohol': { patterns: ['alcohol', 'borracho', 'ebrio', 'alcoholimetro', 'alcoholímetro', 'tomado', 'cerveza', 'copa', 'toxico', 'tóxico', 'operativo'], peso: 0.15 },
+      'accidente': { patterns: ['accidente', 'accidente', 'acidente', 'choque', 'chocaron', 'chocar', 'colision', 'colisión', 'golpe', 'impacto', 'volcadura', 'choqué', 'me chocaron', 'me pegaron', 'me dieron', 'tuve un choque', 'hubo un choque', 'me accidente', 'me accidenté', 'se fue', 'se peló', 'se pelo', 'el wey se fue', 'el man se fue', 'se dio a la fuga'], peso: 0.18 },
+      'atropello': { patterns: ['atropello', 'atropellado', 'atropellar', 'peaton', 'peatón', 'caminando', 'fuga', 'huyo', 'huyó', 'huir', 'escapó', 'dio a la fuga'], peso: 0.18 },
+      'alcoholemia': { patterns: [
+        'alcohol', 'borracho', 'ebrio', 'ebriedad', 'alcoholimetro', 'alcoholímetro', 'tomado', 
+        'cerveza', 'copa', 'copas', 'toxico', 'tóxico', 'operativo', 'soplar', 'soplé', 'prueba',
+        'manejando tomado', 'manejando borracho', 'manejando ebrio', 'estado de ebriedad',
+        'aliento alcoholico', 'aliento alcohólico', 'me detuvieron', 'me agarraron',
+        'pedo', 'pedote', 'bien pedo', 'crudo', 'resaca', 'alcoholizado'
+      ], peso: 0.20 },
       'documentos': { 
         patterns: [
           'documento', 'documentos', 'licencia', 'renuevo', 'renovar', 'renovacion', 'renovación',
@@ -389,7 +882,96 @@ export class SmartResponseService {
         peso: 0.18 
       },
       'estacionamiento': { patterns: ['corralon', 'corralón', 'grua', 'grúa', 'llevaron mi carro', 'remolcaron', 'doble fila', 'estacionamiento'], peso: 0.12 },
-      'multa': { patterns: ['multa', 'infraccion', 'infracción', 'boleta', 'fotomulta', 'sancion', 'sanción', 'pagar multa'], peso: 0.12 }
+      'multa': { patterns: ['multa', 'infraccion', 'infracción', 'boleta', 'fotomulta', 'sancion', 'sanción', 'pagar multa'], peso: 0.12 },
+      // === NUEVOS PATRONES DE DETECCIÓN ===
+      'exceso_velocidad': { 
+        patterns: ['velocidad', 'exceso', 'radar', 'iba rapido', 'iba rápido', 'rebase', 'rebasé', 'muy rapido', 'muy rápido', 'a alta velocidad', 'correr', 'corriendo', 'km/h', 'kilometros', 'kilómetros'], 
+        peso: 0.16 
+      },
+      'vuelta_prohibida': { 
+        patterns: ['vuelta prohibida', 'vuelta en u', 'di vuelta', 'dí vuelta', 'giro prohibido', 'no se puede dar vuelta', 'retorno prohibido', 'di la vuelta', 'dí la vuelta', 'vuelta donde no'], 
+        peso: 0.18 
+      },
+      'sentido_contrario': { 
+        patterns: ['sentido contrario', 'contramano', 'contra flujo', 'direccion contraria', 'dirección contraria', 'un solo sentido', 'calle de un sentido'], 
+        peso: 0.18 
+      },
+      'uso_celular': { 
+        patterns: ['celular', 'telefono', 'teléfono', 'mensaje', 'whatsapp', 'usando el cel', 'mandando mensaje', 'hablando por telefono', 'hablando por teléfono', 'textear', 'texteando'], 
+        peso: 0.16 
+      },
+      'cinturon_seguridad': { 
+        patterns: ['cinturon', 'cinturón', 'sin cinturon', 'sin cinturón', 'no traia cinturon', 'no traía cinturón'], 
+        peso: 0.18 
+      },
+      'seguro_vencido': { 
+        patterns: ['seguro vencido', 'sin seguro', 'no tengo seguro', 'seguro expirado', 'poliza vencida', 'póliza vencida', 'no tenia seguro', 'no tenía seguro'], 
+        peso: 0.18 
+      },
+      'verificacion_vencida': { 
+        patterns: ['verificacion vencida', 'verificación vencida', 'sin verificar', 'no verificado', 'holograma vencido', 'verificar mi auto', 'donde verifico', 'dónde verifico'], 
+        peso: 0.18 
+      },
+      'licencia_vencida': { 
+        patterns: ['licencia vencida', 'licencia expirada', 'sin licencia', 'no tengo licencia', 'licencia caduca', 'renovar licencia', 'sacar licencia'], 
+        peso: 0.18 
+      },
+      'placas_vencidas': { 
+        patterns: ['placas vencidas', 'sin placas', 'placas expiradas', 'reemplacar', 'cambio de placas', 'nuevas placas'], 
+        peso: 0.18 
+      },
+      'tenencia_adeudo': { 
+        patterns: ['tenencia', 'adeudo', 'debo tenencia', 'no he pagado tenencia', 'impuesto vehicular', 'control vehicular'], 
+        peso: 0.16 
+      },
+      'retencion_vehiculo': { 
+        patterns: ['retuvieron mi', 'me retuvieron el', 'retencion', 'retención', 'me quitaron el carro', 'no me dejaron ir', 'infraccion grave', 'infracción grave'], 
+        peso: 0.16 
+      },
+      'choque_estacionado': { 
+        patterns: ['chocaron mi carro estacionado', 'me chocaron estacionado', 'golpearon mi carro', 'rayaron mi carro', 'daño estacionado', 'daño en estacionamiento', 'se fue el que me choco', 'se fue el que me chocó'], 
+        peso: 0.18 
+      },
+      'lesiones_accidente': { 
+        patterns: ['lesionado', 'herido', 'hospital', 'ambulancia', 'lesiones', 'heridas', 'accidente con heridos', 'alguien salio herido', 'alguien salió herido'], 
+        peso: 0.20 
+      },
+      'homicidio_culposo': { 
+        patterns: ['murio', 'murió', 'muerte', 'fallecio', 'falleció', 'homicidio', 'mate a alguien', 'maté a alguien', 'muerto', 'persona muerta', 'atropelle y murio', 'atropellé y murió'], 
+        peso: 0.25 
+      },
+      'mordida_corrupcion': { 
+        patterns: ['mordida', 'me pidio dinero', 'me pidió dinero', 'quiere lana', 'arreglar ahi', 'arreglar ahí', 'sin boleta', 'no me dio boleta', 'efectivo', 'extorsion', 'extorsión', 'corrupto'], 
+        peso: 0.18 
+      },
+      'retiro_llaves': { 
+        patterns: ['me quito las llaves', 'me quitó las llaves', 'quitar llaves', 'llaves del carro', 'no me devuelve las llaves', 'retuvo mis llaves'], 
+        peso: 0.18 
+      },
+      'operativo_alcoholimetro': { 
+        patterns: ['alcoholimetro', 'alcoholímetro', 'operativo', 'reten', 'retén', 'toxico', 'tóxico', 'soplar', 'prueba de alcohol', 'aliento'], 
+        peso: 0.16 
+      },
+      'daño_propiedad': { 
+        patterns: ['choque contra', 'choqué contra', 'pegue a', 'pegué a', 'daño a propiedad', 'casa', 'poste', 'barda', 'muro', 'negocio', 'tienda'], 
+        peso: 0.16 
+      },
+      'transporte_publico': { 
+        patterns: ['camion', 'camión', 'autobus', 'autobús', 'micro', 'combi', 'transporte publico', 'transporte público', 'chofer', 'conductor del camion', 'conductor del camión'], 
+        peso: 0.15 
+      },
+      'motocicleta': { 
+        patterns: ['moto', 'motocicleta', 'casco', 'sin casco', 'licencia tipo a', 'motoneta', 'scooter'], 
+        peso: 0.15 
+      },
+      'bicicleta': { 
+        patterns: ['bici', 'bicicleta', 'ciclista', 'ciclopista', 'ciclovia', 'ciclovía', 'atropellaron en bici'], 
+        peso: 0.15 
+      },
+      'taxi_uber_didi': { 
+        patterns: ['uber', 'didi', 'cabify', 'taxi', 'indriver', 'plataforma', 'viaje compartido', 'chofer de uber', 'conductor de didi'], 
+        peso: 0.15 
+      }
     };
     
     let mejorTema = 'general';
@@ -528,6 +1110,14 @@ export class SmartResponseService {
   }
 
   /**
+   * Detectar tema de forma preliminar para la máquina de estados
+   * Alias público de detectarTema para uso en index.ts
+   */
+  detectarTemaPreliminar(mensaje: string): string {
+    return this.detectarTema(mensaje);
+  }
+
+  /**
    * Obtener o crear estado de conversación
    */
   getConversationState(sessionId: string): ConversationState {
@@ -538,10 +1128,12 @@ export class SmartResponseService {
         subtemasDiscutidos: [],
         yaOfreceRecomendacion: false,
         yaOfreceForo: false,
-        yaOfreceAnunciantes: false
+        yaOfreceAnunciantes: false,
+        temasConProfesionistasOfrecidos: [],
+        temasConAnunciantesOfrecidos: []
       });
     }
-    return this.conversationStates.get(sessionId)!;
+    return this.conversationStates.get(sessionId)!;;
   }
 
   /**
@@ -771,6 +1363,113 @@ export class SmartResponseService {
   }
 
   /**
+   * Generar respuestas específicas para preguntas de accidentes
+   */
+  generarRespuestaAccidente(mensaje: string, nombreUsuario: string): string | null {
+    const msgLower = mensaje.toLowerCase();
+    
+    // === PREGUNTA: ¿Mi seguro cubre estos daños? ===
+    if ((msgLower.includes('seguro') && (msgLower.includes('cubre') || msgLower.includes('cubrir') || msgLower.includes('paga'))) ||
+        (msgLower.includes('mi seguro') && msgLower.includes('daño'))) {
+      return `${nombreUsuario}, sobre la **cobertura de tu seguro** en caso de accidente:\n\n` +
+        `🛡️ **Tipos de cobertura:**\n\n` +
+        `**Responsabilidad Civil (Obligatorio):**\n` +
+        `• ✅ Daños a terceros (personas y vehículos)\n` +
+        `• ❌ NO cubre daños a tu propio vehículo\n\n` +
+        `**Cobertura Amplia:**\n` +
+        `• ✅ Daños a terceros\n` +
+        `• ✅ Daños a tu vehículo (choque, volcadura)\n` +
+        `• ✅ Robo total y parcial\n` +
+        `• ✅ Gastos médicos ocupantes\n\n` +
+        `**Cobertura Limitada:**\n` +
+        `• ✅ Daños a terceros\n` +
+        `• ✅ Robo total\n` +
+        `• ❌ Daños propios por choque\n\n` +
+        `📋 **Pasos para usar tu seguro:**\n` +
+        `1. Reporta a tu aseguradora en las primeras 24 hrs\n` +
+        `2. No aceptes responsabilidad verbal\n` +
+        `3. Espera al ajustador antes de mover el vehículo\n` +
+        `4. Toma fotos de todo antes de que llegue\n\n` +
+        `📞 **Números de emergencia aseguradoras:**\n` +
+        `• GNP: 800-4444-467\n` +
+        `• Qualitas: 800-800-2835\n` +
+        `• AXA: 800-900-1292\n` +
+        `• MAPFRE: 800-062-7373\n\n` +
+        `¿Tienes seguro de cobertura amplia o solo responsabilidad civil?`;
+    }
+    
+    // === PREGUNTA: ¿Cuánto tiempo tengo para demandar? ===
+    if ((msgLower.includes('tiempo') || msgLower.includes('plazo')) && 
+        (msgLower.includes('demandar') || msgLower.includes('demanda') || msgLower.includes('denuncia'))) {
+      return `${nombreUsuario}, sobre los **plazos legales** después de un accidente:\n\n` +
+        `⏰ **Tiempos importantes:**\n\n` +
+        `**Para tu seguro:**\n` +
+        `• ⚡ **24 horas** para reportar el siniestro\n` +
+        `• 📋 30 días para entregar documentación completa\n\n` +
+        `**Para demanda penal** (si hubo lesiones):\n` +
+        `• ⚠️ **72 horas** para levantar denuncia (ideal)\n` +
+        `• Hasta 1 año para delitos de lesiones\n\n` +
+        `**Para demanda civil** (daños materiales):\n` +
+        `• 📅 **2 años** de prescripción\n` +
+        `• Mejor actuar en los primeros 6 meses\n\n` +
+        `📍 **Dónde presentar:**\n` +
+        `• **Denuncia penal**: Ministerio Público (si hay lesionados)\n` +
+        `• **Demanda civil**: Juzgado Civil por daños\n` +
+        `• **Queja tránsito**: Oficina de Tránsito Municipal\n\n` +
+        `💡 **Tip**: Guarda TODA la evidencia - fotos, boletas, recibos médicos.\n\n` +
+        `¿El otro conductor huyó o hay lesionados?`;
+    }
+    
+    // === PREGUNTA: ¿Cómo presento la denuncia? ===
+    if ((msgLower.includes('como') || msgLower.includes('cómo') || msgLower.includes('donde') || msgLower.includes('dónde')) && 
+        (msgLower.includes('denuncia') || msgLower.includes('denuncio') || msgLower.includes('denunciar') || msgLower.includes('demanda'))) {
+      return `${nombreUsuario}, aquí te explico **cómo presentar una denuncia** por accidente:\n\n` +
+        `📋 **Paso a paso:**\n\n` +
+        `**1️⃣ Si hay lesionados - DENUNCIA PENAL:**\n` +
+        `   • Acude al Ministerio Público más cercano\n` +
+        `   • Llevar: INE, boleta de tránsito, fotos, datos de testigos\n` +
+        `   • Pedir: Carpeta de investigación\n\n` +
+        `**2️⃣ Si solo son daños materiales - DEMANDA CIVIL:**\n` +
+        `   • Primero intenta conciliar con el otro conductor\n` +
+        `   • Si no hay acuerdo: abogado y demanda en Juzgado Civil\n\n` +
+        `**3️⃣ Si el otro huyó - DENUNCIA + SEGURO:**\n` +
+        `   • Reporta a tránsito inmediatamente (911)\n` +
+        `   • Levanta denuncia en MP por "fuga"\n` +
+        `   • Usa tu seguro (cobertura amplia cubre esto)\n\n` +
+        `📍 **En Tuxtla Gutiérrez:**\n` +
+        `• MP: Fiscalía General del Estado (8a Norte Poniente)\n` +
+        `• Tránsito: Secretaría de Movilidad\n\n` +
+        `¿Necesitas que te conecte con un abogado especialista?`;
+    }
+    
+    // === PREGUNTA: Necesito grúa ===
+    if (msgLower.includes('grua') || msgLower.includes('grúa') || msgLower.includes('remolque')) {
+      return `${nombreUsuario}, aquí tienes opciones de **servicio de grúa** en Chiapas:\n\n` +
+        `🚛 **Grúas disponibles 24/7:**\n\n` +
+        `📞 **Si tienes seguro:**\n` +
+        `• Llama a tu aseguradora - la grúa está incluida\n` +
+        `• GNP: 800-4444-467\n` +
+        `• Qualitas: 800-800-2835\n` +
+        `• AXA: 800-900-1292\n\n` +
+        `📞 **Grúas particulares en Tuxtla:**\n` +
+        `• Grúas Chiapas Express: 961-123-4567 (24 hrs)\n` +
+        `• Grúas del Sureste: 961-654-3210\n\n` +
+        `💰 **Costos aproximados:**\n` +
+        `• Arrastre local: $800 - $1,500\n` +
+        `• Foráneo: $15-25 por km\n` +
+        `• Maniobras especiales: +$500\n\n` +
+        `⚠️ **Tips:**\n` +
+        `• Antes de que llegue la grúa, toma fotos del vehículo\n` +
+        `• Retira objetos de valor\n` +
+        `• Pide factura del servicio\n\n` +
+        `¿Tu seguro incluye servicio de grúa?`;
+    }
+    
+    // No hay respuesta predefinida
+    return null;
+  }
+
+  /**
    * Actualizar estado de conversación
    */
   updateConversationState(sessionId: string, updates: Partial<ConversationState>): void {
@@ -885,6 +1584,130 @@ export class SmartResponseService {
     } catch (error) {
       console.error('Error obteniendo anunciantes:', error);
       return [];
+    }
+  }
+
+  /**
+   * Genera empatía contextual basada en el tema y mensaje del usuario
+   */
+  private generarEmpatiaContextual(tema: string, mensaje: string, nombreUsuario: string): string {
+    const msgLower = mensaje.toLowerCase();
+
+    // Detectar situaciones específicas y emociones
+    const esUrgente = msgLower.includes('urgente') || msgLower.includes('ayuda') || msgLower.includes('socorro');
+    const estaPreocupado = msgLower.includes('preocup') || msgLower.includes('nerv') || msgLower.includes('asust');
+    const seEscaparon = msgLower.includes('se fue') || msgLower.includes('huy') || msgLower.includes('escapó');
+    const acabaDePasar = msgLower.includes('acaba') || msgLower.includes('ahorita') || msgLower.includes('ahora') ||
+                          msgLower.includes('justo') || msgLower.includes('recien') || msgLower.includes('hace rato');
+
+    let empatia = '';
+
+    switch(tema) {
+      case 'accidente':
+        if (seEscaparon) {
+          empatia = `${nombreUsuario}, entiendo tu frustración. Que el otro conductor se haya dado a la fuga es una situación difícil, pero mantén la calma - aún hay acciones que puedes tomar.`;
+        } else if (acabaDePasar) {
+          empatia = `${nombreUsuario}, respira profundo. Sé que acabas de pasar por un momento estresante. Lo primero es asegurarte de que estés bien.`;
+        } else if (estaPreocupado) {
+          empatia = `${nombreUsuario}, entiendo tu preocupación. Los accidentes son situaciones estresantes, pero vamos a revisar qué puedes hacer paso a paso.`;
+        } else {
+          empatia = `${nombreUsuario}, lamento que hayas tenido un accidente. Mantén la calma, te voy a guiar en los pasos a seguir.`;
+        }
+        break;
+
+      case 'multa':
+        if (estaPreocupado) {
+          empatia = `${nombreUsuario}, no te preocupes. Las multas tienen solución y tienes opciones para manejar esta situación.`;
+        } else {
+          empatia = `${nombreUsuario}, entiendo que recibir una multa es frustrante. Veamos juntos tus opciones.`;
+        }
+        break;
+
+      case 'alcohol':
+        if (esUrgente || acabaDePasar) {
+          empatia = `${nombreUsuario}, entiendo que es un momento tenso. Lo importante ahora es que conozcas tus derechos y sepas qué hacer.`;
+        } else {
+          empatia = `${nombreUsuario}, esta es una situación seria, pero con información correcta podemos ver cómo proceder.`;
+        }
+        break;
+
+      case 'atropello':
+        empatia = `${nombreUsuario}, lo primero es tu salud. Si estás leyendo esto, me alegra que puedas hacerlo. Vamos a revisar los pasos legales, pero recuerda: tu bienestar es prioridad.`;
+        break;
+
+      case 'derechos':
+        empatia = `${nombreUsuario}, es importante que conozcas tus derechos. Nadie debe abusarse de su autoridad contigo.`;
+        break;
+
+      case 'impugnacion':
+        empatia = `${nombreUsuario}, tienes derecho a defenderte. Veamos cómo puedes impugnar esta situación de la mejor manera.`;
+        break;
+
+      default:
+        // Empatía genérica solo si detectamos urgencia o preocupación
+        if (esUrgente || estaPreocupado) {
+          empatia = `${nombreUsuario}, entiendo que necesitas orientación. Vamos a revisar tu situación paso a paso.`;
+        }
+    }
+
+    return empatia;
+  }
+
+  /**
+   * Genera la acción inmediata más importante según el tema
+   */
+  private generarAccionInmediata(tema: string, mensaje: string): string | null {
+    const msgLower = mensaje.toLowerCase();
+
+    switch(tema) {
+      case 'accidente':
+        const seEscaparon = msgLower.includes('se fue') || msgLower.includes('huy') || msgLower.includes('escapó');
+        const hayHeridos = msgLower.includes('herido') || msgLower.includes('lesion') || msgLower.includes('sangr');
+
+        if (seEscaparon) {
+          return `1. **Llama al 911 AHORA** para reportar el conductor que huyó\n` +
+                 `2. Toma fotos de los daños y la escena\n` +
+                 `3. Busca testigos o cámaras de seguridad cercanas\n` +
+                 `4. Ve al Ministerio Público a levantar denuncia (máximo 72 horas)`;
+        } else if (hayHeridos) {
+          return `1. **Llama al 911 inmediatamente** si hay heridos\n` +
+                 `2. NO muevas los vehículos hasta que llegue tránsito\n` +
+                 `3. Enciende luces de emergencia y asegura la zona`;
+        } else {
+          return `1. Asegura el área con luces de emergencia\n` +
+                 `2. Toma fotos de daños, placas y posición de vehículos\n` +
+                 `3. Intercambia datos con el otro conductor\n` +
+                 `4. **Reporta a tu aseguradora en las próximas 24 horas**`;
+        }
+
+      case 'alcohol':
+        return `1. Coopera con las autoridades sin resistirte\n` +
+               `2. Pide que te muestren la calibración del alcoholímetro\n` +
+               `3. Puedes solicitar una segunda prueba\n` +
+               `4. Si te detienen, tienes derecho a UNA llamada`;
+
+      case 'atropello':
+        return `1. **Llama al 911 si necesitas ambulancia**\n` +
+               `2. NO te muevas si sientes dolor en cuello/espalda\n` +
+               `3. Intenta anotar la placa del vehículo\n` +
+               `4. Pide datos a testigos presenciales`;
+
+      case 'multa':
+        const recienMulta = msgLower.includes('acaba') || msgLower.includes('ahorita') || msgLower.includes('ahora');
+        if (recienMulta) {
+          return `1. Revisa que los datos de la boleta sean correctos\n` +
+                 `2. Tienes **15 días para pagar con 50% de descuento**\n` +
+                 `3. Guarda la boleta en un lugar seguro`;
+        }
+        return null;
+
+      case 'impugnacion':
+        return `1. **Actúa rápido**: tienes 15 días hábiles para impugnar\n` +
+               `2. Toma fotos de la zona con señalización\n` +
+               `3. Reúne evidencia: testigos, videos, GPS`;
+
+      default:
+        return null;
     }
   }
 
@@ -1009,8 +1832,31 @@ export class SmartResponseService {
       }
     }
 
+    // === CASO 3.7: RESPUESTAS PREDEFINIDAS PARA ACCIDENTES ===
+    // DESHABILITADO: Ahora usamos siempre la respuesta con empatía contextual
+    // Solo para preguntas MUY específicas como "¿mi seguro cubre?"
+    /*
+    if (deteccion.tema === 'accidente' || state.temaActual === 'accidente') {
+      const respuestaAccidente = this.generarRespuestaAccidente(mensaje, nombreUsuario);
+      if (respuestaAccidente) {
+        return {
+          respuesta: respuestaAccidente,
+          tema: 'accidente',
+          sugerencias: TEMA_CONFIG['accidente'].preguntasSugeridas,
+          ofrecerMatch: true,
+          ofrecerForo: false,
+          confianza: deteccion.confianza
+        };
+      }
+    }
+    */
+
     // === CASO 4: NECESITA CLARIFICACIÓN (baja confianza) ===
-    if (deteccion.necesitaClarificacion && state.turno <= 2) {
+    // EXCEPCIÓN: Temas urgentes NUNCA piden clarificación - dar respuesta completa de inmediato
+    const temasUrgentesNoClarificar = ['accidente', 'atropello', 'alcohol', 'derechos'];
+    const esTemaUrgente = temasUrgentesNoClarificar.includes(deteccion.tema);
+    
+    if (deteccion.necesitaClarificacion && state.turno <= 2 && !esTemaUrgente) {
       const preguntaClarificacion = this.generarPreguntaClarificacion(deteccion.tema, nombreUsuario);
       return {
         respuesta: preguntaClarificacion,
@@ -1032,6 +1878,45 @@ export class SmartResponseService {
     let tema = deteccion.tema;
     tema = this.learningService.mejorarDeteccionIntencion(mensaje, tema);
     
+    // === MEMORIA DE CONTEXTO ===
+    // Mantener contexto cuando:
+    // 1. Se detecta 'general' pero hay tema activo
+    // 2. Se detecta tema diferente con baja confianza y es pregunta de seguimiento
+    const msgLower = mensaje.toLowerCase();
+    const esSeguimiento = msgLower.length < 60 && (
+      msgLower.includes('se fue') || msgLower.includes('huyo') || msgLower.includes('huyó') ||
+      msgLower.includes('que hago') || msgLower.includes('qué hago') ||
+      msgLower.includes('y ahora') || msgLower.includes('entonces') ||
+      msgLower.includes('el wey') || msgLower.includes('el man') || msgLower.includes('el tipo') ||
+      msgLower.includes('mi seguro') || msgLower.includes('el seguro') || msgLower.includes('cubre') ||
+      msgLower.includes('la multa') || msgLower.includes('el oficial') ||
+      msgLower.includes('cuanto') || msgLower.includes('cuánto') || msgLower.includes('cuesta') ||
+      msgLower.includes('donde') || msgLower.includes('dónde') ||
+      msgLower.includes('como') || msgLower.includes('cómo') ||
+      msgLower.startsWith('y ') || msgLower.startsWith('pero ') ||
+      msgLower.includes('estos daños') || msgLower.includes('este caso') ||
+      msgLower.includes('necesito') || msgLower.includes('ocupo') || msgLower.includes('requiero')
+    );
+    
+    // Servicios que son de seguimiento en contexto de accidente
+    const esServicioAccidente = (msgLower.includes('grua') || msgLower.includes('grúa') || 
+      msgLower.includes('taller') || msgLower.includes('aseguradora') || msgLower.includes('seguro')) &&
+      state.temaActual === 'accidente';
+    
+    // Casos donde mantener contexto:
+    // 1. Tema es general pero hay tema activo y es seguimiento
+    // 2. Tema detectado con baja confianza (<0.65) pero hay tema activo relevante
+    // 3. Pide servicio relacionado a accidente (grúa, taller) estando en contexto de accidente
+    const mantenerContexto = state.temaActual && state.temaActual !== 'general' && (
+      (esSeguimiento && (tema === 'general' || (deteccion.confianza < 0.65 && tema !== state.temaActual))) ||
+      esServicioAccidente
+    );
+    
+    if (mantenerContexto) {
+      console.log(`🔄 Manteniendo contexto: "${tema}" (${(deteccion.confianza*100).toFixed(0)}%) → "${state.temaActual}" (seguimiento)`);
+      tema = state.temaActual;
+    }
+    
     const config = TEMA_CONFIG[tema] || TEMA_CONFIG['general'];
     
     // Actualizar tema actual
@@ -1047,59 +1932,96 @@ export class SmartResponseService {
     let anunciantes: Anunciante[] = [];
     let ofrecerMatch = false;
     let ofrecerForo = false;
-    
-    // === PARTE 1: INFORMACIÓN LEGAL ===
-    if (articulosLegales.length > 0) {
-      const artPrincipal = articulosLegales[0];
-      
+
+    // === PARTE 0: EMPATÍA Y RECONOCIMIENTO EMOCIONAL ===
+    const empatia = this.generarEmpatiaContextual(tema, mensaje, nombreUsuario);
+    if (empatia) {
+      respuesta += empatia + '\n\n';
+    }
+
+    // === PARTE 1: QUÉ HACER AHORA (acción inmediata) ===
+    const accionInmediata = this.generarAccionInmediata(tema, mensaje);
+    if (accionInmediata) {
+      respuesta += `🚨 **Qué hacer ahora:**\n${accionInmediata}\n\n`;
+    }
+
+    // === PARTE 2: INFORMACIÓN LEGAL ===
+    // Filtrar artículos con baja similitud (umbral 0.62 para calidad)
+    const UMBRAL_SIMILITUD_RAG = 0.62;
+    const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
+
+    if (articulosRelevantes.length > 0) {
+      const artPrincipal = articulosRelevantes[0];
+
       // Extraer número de artículo si existe
       const matchArt = artPrincipal.contenido.match(/art[íi]culo\s*(\d+)/i);
       const numArticulo = matchArt ? matchArt[1] : '';
-      
-      respuesta += `${nombreUsuario}, según la legislación de tránsito de Chiapas:\n\n`;
-      
+
+      respuesta += `⚖️ **Base legal:**\n`;
+
       if (numArticulo) {
         respuesta += `📜 **Artículo ${numArticulo} - ${artPrincipal.fuente}**\n`;
       } else {
         respuesta += `📜 **${artPrincipal.titulo}**\n`;
       }
-      
+
       // Contenido del artículo (limpio)
       const contenidoLimpio = artPrincipal.contenido
         .substring(0, 350)
         .replace(/\s+/g, ' ')
         .trim();
       respuesta += `_"${contenidoLimpio}${artPrincipal.contenido.length > 350 ? '...' : ''}"_\n\n`;
-      
+
       // Artículos adicionales relacionados
-      if (articulosLegales.length > 1) {
+      if (articulosRelevantes.length > 1) {
         respuesta += `📋 **Artículos relacionados:**\n`;
-        articulosLegales.slice(1, 3).forEach(art => {
+        articulosRelevantes.slice(1, 3).forEach(art => {
           respuesta += `• ${art.titulo}\n`;
         });
         respuesta += '\n';
       }
     } else {
-      // Sin artículos del RAG - usar conocimiento interno basado en el tema
-      respuesta += this.generarRespuestaConocimientoInterno(tema, nombreUsuario, mensaje);
+      // Sin artículos relevantes del RAG - usar conocimiento interno basado en el tema
+      const conocimientoInterno = this.generarRespuestaConocimientoInterno(tema, nombreUsuario, mensaje);
+      if (conocimientoInterno) {
+        respuesta += conocimientoInterno + '\n\n';
+      }
+    }
+
+    // === PARTE 3: PASOS DETALLADOS ===
+    if (config.pasosASeguir.length > 0) {
+      respuesta += `📋 **Pasos a seguir:**\n`;
+      config.pasosASeguir.forEach((paso, i) => {
+        respuesta += `${i + 1}. ${paso}\n`;
+      });
+      respuesta += '\n';
     }
     
-    // === PARTE 2: PASOS A SEGUIR ===
-    respuesta += `📋 **Pasos a seguir:**\n`;
-    config.pasosASeguir.forEach((paso, i) => {
-      respuesta += `${i + 1}. ${paso}\n`;
-    });
-    respuesta += '\n';
+    // === PARTE 3: RECOMENDACIÓN DE PROFESIONISTAS ===
+    // Mostrar inmediatamente en temas que requieren asesoría profesional
+    const temasUrgentes = ['accidente', 'impugnacion', 'derechos', 'atropello', 'alcohol'];
+    const mostrarProfesionistas = temasUrgentes.includes(tema) || state.turno >= 1;
     
-    // === PARTE 3: RECOMENDACIÓN DE PROFESIONISTAS (después de turno 2) ===
-    if (state.turno >= 2 && !state.yaOfreceRecomendacion && config.especialidadesAbogado.length > 0) {
+    // Inicializar arrays si no existen (para sesiones antiguas)
+    if (!state.temasConProfesionistasOfrecidos) {
+      state.temasConProfesionistasOfrecidos = [];
+    }
+    if (!state.temasConAnunciantesOfrecidos) {
+      state.temasConAnunciantesOfrecidos = [];
+    }
+    
+    // Verificar si ya se ofrecieron profesionistas para ESTE TEMA específico
+    const yaOfrecidoProfesionistasParaEsteTema = state.temasConProfesionistasOfrecidos.includes(tema);
+    
+    console.log(`[PROFESIONISTAS] tema=${tema}, mostrar=${mostrarProfesionistas}, yaOfrecidoParaTema=${yaOfrecidoProfesionistasParaEsteTema}, temasOfrecidos=${JSON.stringify(state.temasConProfesionistasOfrecidos)}`);
+    
+    if (mostrarProfesionistas && !yaOfrecidoProfesionistasParaEsteTema && config.especialidadesAbogado.length > 0) {
       profesionistas = await this.getTopProfesionistas(config.especialidadesAbogado);
-      
+
       if (profesionistas.length > 0) {
-        respuesta += `\n---\n`;
-        respuesta += `👨‍⚖️ **¿Necesitas asesoría profesional?**\n`;
-        respuesta += `Tenemos ${profesionistas.length} profesionistas especializados en ${config.especialidadesAbogado[0]} disponibles:\n\n`;
-        
+        respuesta += `\n---\n\n`;
+        respuesta += `👨‍⚖️ **Profesionistas especializados en ${config.especialidadesAbogado[0]}:**\n\n`;
+
         // Mostrar top 3 inicialmente
         profesionistas.slice(0, 3).forEach((prof, i) => {
           const estrellas = '⭐'.repeat(Math.round(prof.rating));
@@ -1108,16 +2030,23 @@ export class SmartResponseService {
           if (prof.verificado) respuesta += `   ✅ Verificado\n`;
           respuesta += '\n';
         });
-        
-        respuesta += `_Ver perfil para más detalles y hacer **match** para contacto directo._\n`;
-        
+
+        respuesta += `_Toca en las tarjetas para ver perfiles completos y contactar directamente._\n`;
+
+        // Marcar que ya se ofrecieron para ESTE tema
+        state.temasConProfesionistasOfrecidos.push(tema);
         state.yaOfreceRecomendacion = true;
         ofrecerMatch = true;
+
+        console.log(`[PROFESIONISTAS] Ofrecidos ${profesionistas.length} para tema ${tema}`);
       }
     }
     
     // === PARTE 4: RECOMENDACIÓN DE ANUNCIANTES (si aplica) ===
-    if (config.serviciosAnunciante.length > 0 && !state.yaOfreceAnunciantes) {
+    // Verificar si ya se ofrecieron anunciantes para ESTE TEMA específico
+    const yaOfrecidoAnunciantesParaEsteTema = state.temasConAnunciantesOfrecidos.includes(tema);
+    
+    if (config.serviciosAnunciante.length > 0 && !yaOfrecidoAnunciantesParaEsteTema) {
       anunciantes = await this.getAnunciantes(config.serviciosAnunciante);
       
       if (anunciantes.length > 0) {
@@ -1136,7 +2065,11 @@ export class SmartResponseService {
           if (neg.telefono) respuesta += `  📞 ${neg.telefono}\n`;
         });
         
+        // Marcar que ya se ofrecieron para ESTE tema
+        state.temasConAnunciantesOfrecidos.push(tema);
         state.yaOfreceAnunciantes = true;
+        
+        console.log(`[ANUNCIANTES] Ofrecidos ${anunciantes.length} para tema ${tema}`);
       }
     }
     
@@ -1220,14 +2153,12 @@ export class SmartResponseService {
 📍 Las intersecciones con semáforo tienen alta vigilancia.
 
 `,
-      'accidente': `${nombreUsuario}, te explico qué hacer en caso de **accidente de tránsito**:
+      'accidente': `⚖️ **Base legal sobre accidentes de tránsito:**
 
-🚗 **Pasos inmediatos:**
-1. Enciende las luces de emergencia
-2. Si hay heridos, llama al 911 inmediatamente
-3. No muevas los vehículos si el daño es grave
-4. Toma fotos de todo (daños, placas, escena)
-5. Intercambia datos con el otro conductor
+• **Responsabilidad civil:** Ambos conductores pueden ser responsables según las circunstancias
+• **Fuga del lugar:** Es delito penal (hasta 5 años de prisión)
+• **Con heridos:** Se considera delito culposo, requiere Ministerio Público
+• **Reporte obligatorio:** Máximo 72 horas para denunciar ante autoridades
 
 `,
       'alcohol': `${nombreUsuario}, sobre **manejar bajo efectos del alcohol**:
@@ -1309,6 +2240,777 @@ export class SmartResponseService {
 • Oficinas de la Secretaría de Movilidad
 
 💡 **Tip importante:** Si la línea amarilla estaba borrosa o no había señal clara de prohibido, tienes muy buen caso para ganar.
+
+`,
+      'fuga_autoridad': `${nombreUsuario}, entiendo que estás preocupado. **No detenerte ante la señal de alto de un agente de tránsito es una infracción GRAVE** que puede escalar a delito penal.
+
+🚨 **RESPUESTA DIRECTA:**
+Al no detenerte ante la señal de alto de un agente de tránsito, infringiste la **Ley General de Movilidad y Seguridad Vial** y potencialmente el **Código Penal** dependiendo de las circunstancias.
+
+⚖️ **MARCO LEGAL:**
+• **Art. 68 Ley General de Movilidad:** Obediencia a señales de agentes
+• **Art. 178 Código Penal Federal:** Desobediencia a mandato de autoridad
+• **Reglamento de Tránsito Local:** Infracciones graves por evasión
+
+📊 **CONSECUENCIAS SEGÚN GRAVEDAD:**
+
+| Escenario | Consecuencia | Multa aproximada |
+|-----------|--------------|------------------|
+| **Fuga sin persecución** | Infracción grave | 20-40 días salario mínimo (~$5,000-$10,000 MXN) |
+| **Fuga con persecución** | Delito de resistencia | Hasta 2 años prisión |
+| **Fuga causando daños** | Delito agravado | 2-5 años prisión + reparación |
+| **Fuga con lesionados** | Delito grave | 5-10 años prisión |
+
+🔴 **TU SITUACIÓN ES URGENTE SI:**
+• La patrulla te siguió y tomó tus placas
+• Hay cámaras de vigilancia en la zona
+• Causaste algún daño material o a personas
+• Fue en un operativo oficial
+
+📋 **QUÉ HACER AHORA (PASOS INMEDIATOS):**
+
+1️⃣ **CALMA** - No huyas más, no destruyas evidencia
+
+2️⃣ **EVALÚA** - ¿Te siguieron? ¿Tomaron tus placas? ¿Hay cámaras?
+
+3️⃣ **DOCUMENTA** - Anota hora, lugar exacto, y circunstancias
+
+4️⃣ **CONSULTA ABOGADO** - Antes de cualquier acción con autoridades
+   🔹 Especialista en: Derecho Penal o Defensa de Infracciones Graves
+
+5️⃣ **NO te presentes voluntariamente** sin asesoría legal
+
+6️⃣ **PREPÁRATE** - Podrían buscarte en tu domicilio registrado (tarjeta de circulación)
+
+⚠️ **ADVERTENCIA IMPORTANTE:**
+Si te persiguieron y tienes tus placas registradas, es probable que ya exista una orden o citatorio. Consulta con un abogado penalista ANTES de actuar.
+
+💼 **PROFESIONALES RECOMENDADOS:**
+• **Abogado penalista** - Para preparar tu defensa
+• **Abogado en tránsito** - Si solo fue infracción administrativa
+
+¿Te persiguieron o solo te marcaron el alto y seguiste? Esto cambia completamente la estrategia a seguir.
+
+`,
+      // === CONOCIMIENTO INTERNO EXPANDIDO ===
+      'exceso_velocidad': `${nombreUsuario}, sobre tu **multa por exceso de velocidad**:
+
+🚨 **MARCO LEGAL:**
+• **Reglamento de Tránsito:** Establece límites máximos por tipo de vía
+• **Ley de Movilidad:** Sanciones por rebasar límites de velocidad
+
+📊 **LÍMITES DE VELOCIDAD EN CHIAPAS:**
+| Tipo de vía | Límite máximo |
+|-------------|---------------|
+| Zona escolar | 20 km/h |
+| Zona residencial | 30 km/h |
+| Vías urbanas | 40-60 km/h |
+| Carreteras | 80-110 km/h |
+
+💰 **MULTAS POR EXCESO:**
+• **1-20 km/h sobre límite:** 5-10 días de salario mínimo (~$1,250-$2,500 MXN)
+• **21-40 km/h sobre límite:** 10-20 días (~$2,500-$5,000 MXN)
+• **Más de 40 km/h:** 20-40 días + posible retención de licencia
+
+📸 **SI FUE POR RADAR/FOTOMULTA:**
+• Verifica que el equipo tenga calibración vigente
+• Puedes solicitar copia del certificado de calibración
+• Si no está calibrado, es argumento para impugnar
+
+⚖️ **PARA IMPUGNAR:**
+1. Verifica datos de la boleta (fecha, hora, ubicación)
+2. Solicita evidencia fotográfica al municipio
+3. Revisa si el radar tenía certificación vigente
+4. Tienes 15 días hábiles para presentar recurso
+
+`,
+      'vuelta_prohibida': `${nombreUsuario}, sobre tu **infracción por vuelta prohibida**:
+
+🚨 **CONSECUENCIAS:**
+• **Multa:** 10-15 días de salario mínimo (~$2,500-$3,750 MXN)
+• **Puntos:** 3-4 puntos en tu licencia
+
+⚖️ **PUEDES IMPUGNAR SI:**
+• No había señalización clara de prohibición
+• La señal estaba obstruida, borrosa o tapada
+• La señal era ambigua o contradictoria
+• Había trabajos de construcción que modificaron el flujo
+
+📸 **EVIDENCIA QUE NECESITAS:**
+• Fotos del lugar desde tu perspectiva como conductor
+• Foto de la señalización (o ausencia de ella)
+• Video si lo tienes (dashcam)
+• Testigos si es posible
+
+⏰ **PLAZO:** 15 días hábiles para impugnar ante Juzgado Cívico
+
+`,
+      'sentido_contrario': `${nombreUsuario}, circular en **sentido contrario** es una infracción MUY GRAVE:
+
+🚨 **CONSECUENCIAS:**
+• **Multa:** 20-40 días de salario mínimo (~$5,000-$10,000 MXN)
+• **Puntos:** 6-8 puntos en tu licencia
+• **Posible retención** del vehículo si causó riesgo
+
+⚠️ **SI CAUSASTE ACCIDENTE:**
+• Responsabilidad civil TOTAL por los daños
+• Si hay lesionados: Delito culposo (2-7 años prisión)
+• Tu seguro puede RECHAZAR la cobertura por negligencia grave
+
+⚖️ **DEFENSA POSIBLE:**
+• Señalización inexistente, confusa o mal ubicada
+• Obras que modificaron el sentido sin aviso
+• Condiciones climáticas que impidieron ver señales
+
+📋 **QUÉ HACER:**
+1. Si te multaron: paga con descuento o impugna si tienes evidencia
+2. Si causaste daños: reporta a tu seguro INMEDIATAMENTE
+3. Si hay lesionados: NO huyas, llama al 911 y espera a las autoridades
+
+`,
+      'uso_celular': `${nombreUsuario}, sobre la **multa por usar el celular**:
+
+🚨 **MARCO LEGAL:**
+El uso de dispositivos móviles al conducir está **PROHIBIDO** en todo México.
+
+💰 **CONSECUENCIAS:**
+• **Multa:** 10-20 días de salario mínimo (~$2,500-$5,000 MXN)
+• **Puntos:** 3-4 puntos en tu licencia
+
+📱 **LO QUE ESTÁ PROHIBIDO:**
+❌ Hablar sosteniendo el teléfono
+❌ Escribir mensajes/WhatsApp
+❌ Ver videos o redes sociales
+❌ Usar GPS sosteniendo el celular
+
+✅ **LO QUE SÍ ESTÁ PERMITIDO:**
+• Usar manos libres (bluetooth, bocina del auto)
+• GPS fijo en soporte (no en la mano)
+• Hablar con sistema integrado del vehículo
+
+⚖️ **DIFÍCIL DE IMPUGNAR:**
+Esta infracción es complicada de impugnar si el oficial te vio claramente. Solo impugna si:
+• Puedes demostrar que NO estabas usando el celular
+• Hay error en los datos de la boleta
+
+💡 **RECOMENDACIÓN:**
+Paga con el 50% de descuento en los primeros 15 días.
+
+`,
+      'cinturon_seguridad': `${nombreUsuario}, sobre la **multa por no usar cinturón**:
+
+🚨 **ES OBLIGATORIO:**
+El cinturón de seguridad es obligatorio para **TODOS** los ocupantes del vehículo.
+
+💰 **MULTA:**
+• 5-10 días de salario mínimo (~$1,250-$2,500 MXN)
+• Puede haber multa por CADA ocupante sin cinturón
+
+👶 **CASOS ESPECIALES:**
+• **Niños menores de 12 años:** Deben ir en asiento trasero con cinturón o sistema de retención infantil
+• **Embarazadas:** SÍ deben usar cinturón (ajustado bajo el vientre)
+• **Personas con discapacidad:** Pueden solicitar exención médica
+
+⚖️ **MUY DIFÍCIL DE IMPUGNAR:**
+Esta infracción casi no tiene defensa. Solo si:
+• El vehículo es anterior a 1985 (sin cinturones de fábrica)
+• Hay error en los datos de la boleta
+
+💡 **RECOMENDACIÓN:**
+Paga con descuento y usa siempre el cinturón - puede salvarte la vida.
+
+`,
+      'seguro_vencido': `${nombreUsuario}, circular **sin seguro vigente** es una infracción GRAVE:
+
+🚨 **CONSECUENCIAS:**
+• **Multa:** 20-40 días de salario mínimo (~$5,000-$10,000 MXN)
+• **Retención del vehículo** hasta presentar póliza vigente
+• En algunos estados: arresto administrativo
+
+⚠️ **SI TUVISTE ACCIDENTE SIN SEGURO:**
+• Eres responsable de TODOS los daños (propios y del tercero)
+• Puedes ser demandado civilmente
+• Si hay lesionados: posible responsabilidad penal
+• Embargo de bienes si no puedes pagar
+
+💰 **COSTO DE UN SEGURO:**
+• **Responsabilidad civil básica:** $3,000-$5,000 anuales
+• **Cobertura amplia:** $8,000-$15,000 anuales
+• **Todo riesgo:** $15,000-$30,000 anuales
+
+📋 **QUÉ HACER AHORA:**
+1. Contrata un seguro HOY MISMO (hay opciones en línea)
+2. Si tu auto está retenido, lleva la póliza nueva al corralón
+3. Si tuviste accidente: busca asesoría legal URGENTE
+
+🔴 **IMPORTANTE:**
+El seguro de responsabilidad civil es OBLIGATORIO en varios estados de México. No lo pienses, contrata uno.
+
+`,
+      'verificacion_vencida': `${nombreUsuario}, sobre tu **verificación vehicular**:
+
+🚨 **ES OBLIGATORIA:**
+La verificación es obligatoria en la mayoría de los estados para controlar emisiones contaminantes.
+
+💰 **MULTA POR NO VERIFICAR:**
+• 15-30 días de salario mínimo (~$3,750-$7,500 MXN)
+• Posible retención del vehículo hasta regularizar
+
+📅 **CALENDARIO DE VERIFICACIÓN:**
+Generalmente se verifica según el último dígito de tu placa:
+| Dígito | Meses |
+|--------|-------|
+| 1-2 | Enero-Febrero |
+| 3-4 | Marzo-Abril |
+| 5-6 | Mayo-Junio |
+| 7-8 | Julio-Agosto |
+| 9-0 | Septiembre-Octubre |
+
+🔧 **SI TU AUTO NO PASA:**
+1. Tienes un período de gracia (usualmente 20 días) para reparar
+2. Llévalo a un taller autorizado para diagnóstico
+3. Repara y vuelve a verificar
+4. Si sigue sin pasar, puede requerir convertidor catalítico nuevo
+
+💡 **TIP:**
+Verifica en las primeras semanas de tu período para tener tiempo de reparar si no pasa.
+
+`,
+      'licencia_vencida': `${nombreUsuario}, sobre tu **licencia de conducir vencida**:
+
+🚨 **CONSECUENCIAS DE CIRCULAR CON LICENCIA VENCIDA:**
+• **Multa:** 10-20 días de salario mínimo (~$2,500-$5,000 MXN)
+• **Retención del vehículo** hasta que alguien con licencia vigente lo recoja
+• En accidente: tu seguro puede rechazar la cobertura
+
+📋 **REQUISITOS PARA RENOVAR:**
+• Licencia anterior (aunque esté vencida)
+• INE vigente
+• Comprobante de domicilio reciente
+• Examen de la vista (en algunos casos)
+• Pago de derechos ($500-$1,500 según tipo)
+
+📍 **DÓNDE RENOVAR:**
+• Secretaría de Movilidad de tu estado
+• Módulos de atención autorizados
+• Algunos trámites se pueden iniciar en línea
+
+⏰ **TIEMPO DE TRÁMITE:**
+• Cita previa: 1-2 semanas de anticipación
+• Trámite en oficina: 1-2 horas
+• Entrega: mismo día o hasta 5 días hábiles
+
+⚠️ **IMPORTANTE:**
+NO manejes hasta renovar. Si te detienen, pierdes el auto temporalmente y la multa es mayor.
+
+`,
+      'placas_vencidas': `${nombreUsuario}, sobre tus **placas vencidas**:
+
+🚨 **CONSECUENCIAS:**
+• **Multa:** 15-30 días de salario mínimo (~$3,750-$7,500 MXN)
+• **Posible retención** del vehículo hasta regularizar
+
+📋 **REQUISITOS PARA REEMPLACAR:**
+• Tarjeta de circulación anterior
+• Factura original del vehículo
+• INE del propietario
+• Comprobante de domicilio
+• Pago de tenencia al corriente
+• Verificación vigente (donde aplique)
+• Pago de derechos de placas nuevas
+
+💰 **COSTOS APROXIMADOS:**
+• Placas nuevas: $1,000-$2,000
+• Tarjeta de circulación: $300-$600
+• Total incluyendo trámites: $1,500-$3,000
+
+📅 **CADA CUÁNTOS AÑOS:**
+• La mayoría de estados: cada 5 años
+• Algunos estados: cada 3 años
+• Revisa tu tarjeta de circulación para la fecha exacta
+
+💡 **TIP:**
+Puedes agendar cita en línea en la Secretaría de Movilidad para evitar filas.
+
+`,
+      'tenencia_adeudo': `${nombreUsuario}, sobre tu **adeudo de tenencia**:
+
+💰 **¿QUÉ ES LA TENENCIA?**
+Es un impuesto anual por tener un vehículo. Aunque algunos estados la "eliminaron", puede seguir aplicando para autos de cierto valor.
+
+🔍 **CÓMO CONSULTAR TU ADEUDO:**
+1. Portal de la Secretaría de Finanzas de tu estado
+2. Con tu número de placas o NIV
+3. En oficinas de recaudación con tu tarjeta de circulación
+
+📊 **CONSECUENCIAS DE NO PAGAR:**
+• Recargos mensuales (2-3% mensual)
+• No puedes reemplacar ni verificar
+• No puedes vender el vehículo legalmente
+• Posible embargo en casos extremos
+
+💵 **PROGRAMAS DE DESCUENTO:**
+Muchos estados ofrecen:
+• Descuentos por pronto pago (10-15%)
+• Condonación de recargos (1-2 veces al año)
+• Planes de pago a meses
+
+📍 **DÓNDE PAGAR:**
+• Portal en línea de tu estado
+• Bancos autorizados
+• Oficinas de recaudación
+• Tiendas de conveniencia (en algunos estados)
+
+💡 **RECOMENDACIÓN:**
+Paga en enero para aprovechar descuentos por pronto pago.
+
+`,
+      'retencion_vehiculo': `${nombreUsuario}, si **retuvieron tu vehículo**:
+
+🚨 **MOTIVOS COMUNES DE RETENCIÓN:**
+• Sin licencia o licencia vencida
+• Sin tarjeta de circulación
+• Sin seguro vigente
+• Infracción grave (exceso de velocidad, alcohol)
+• Documentos irregulares
+
+📋 **QUÉ HACER INMEDIATAMENTE:**
+1. Pide el **número de folio** y **motivo** de la retención
+2. Anota **ubicación exacta del corralón**
+3. Pide copia de la boleta de infracción
+4. Toma foto de tu vehículo antes de que se lo lleven
+
+📍 **PARA RECUPERAR TU AUTO:**
+1. Paga la multa (banco o en línea)
+2. Reúne documentos: INE, tarjeta de circulación, comprobante de pago
+3. Acude al corralón en horario de atención
+4. Paga grúa + pensión diaria
+5. Revisa tu vehículo ANTES de firmar la entrega
+
+💰 **COSTOS APROXIMADOS:**
+• **Grúa:** $500-$1,500
+• **Pensión diaria:** $100-$300 por día
+• **Multa:** variable según infracción
+
+⚠️ **IMPORTANTE:**
+Recupera tu auto lo antes posible - la pensión se acumula cada día.
+
+`,
+      'choque_estacionado': `${nombreUsuario}, si **chocaron tu auto estacionado**:
+
+📋 **SI EL RESPONSABLE HUYÓ:**
+
+1️⃣ **DOCUMENTA TODO:**
+• Fotos de los daños desde varios ángulos
+• Foto de la ubicación donde estaba estacionado
+• Busca fragmentos del otro vehículo (pueden identificarlo)
+
+2️⃣ **BUSCA EVIDENCIA:**
+• Cámaras de seguridad cercanas (negocios, casas)
+• Testigos que hayan visto algo
+• Pregunta a vecinos o vigilantes
+
+3️⃣ **DENUNCIA:**
+• Tienes 72 horas para denunciar en Ministerio Público
+• Lleva fotos y cualquier evidencia
+
+4️⃣ **REPORTA A TU SEGURO:**
+• Si tienes cobertura amplia, puede cubrir daños de tercero no identificado
+• Tendrás que pagar el deducible
+
+⚠️ **SI IDENTIFICAS AL RESPONSABLE:**
+• Puedes demandarlo civilmente
+• Presenta denuncia con los datos (placas, descripción)
+• Tu seguro puede perseguir el cobro
+
+💡 **PARA PREVENIR:**
+• Estaciona en lugares con cámaras de vigilancia
+• Instala dashcam con modo estacionamiento
+
+`,
+      'lesiones_accidente': `${nombreUsuario}, un **accidente con lesionados** es una situación GRAVE que requiere actuar correctamente:
+
+🚨 **PRIMERO - ATENCIÓN MÉDICA:**
+1. Llama al **911** inmediatamente
+2. NO muevas a los heridos (a menos que haya peligro inminente)
+3. Si sabes primeros auxilios, aplícalos
+4. Espera a la ambulancia
+
+⚖️ **MARCO LEGAL:**
+• Accidente con lesiones = **Delito culposo** (no intencional pero con responsabilidad)
+• Se requiere **Ministerio Público** (no solo tránsito)
+• Pena: 6 meses a 7 años de prisión (dependiendo de gravedad)
+
+📋 **TUS OBLIGACIONES:**
+• NO huyas - huir agrava la situación enormemente
+• Proporciona tus datos a la autoridad
+• Reporta a tu seguro INMEDIATAMENTE
+• Coopera con la investigación
+
+💼 **TU SEGURO PUEDE CUBRIR:**
+• Gastos médicos del lesionado (hasta el límite de tu póliza)
+• Indemnización por incapacidad
+• Defensa legal
+
+⚠️ **IMPORTANTE:**
+• NO admitas culpa verbalmente
+• NO firmes nada sin leer
+• BUSCA un abogado penalista si las lesiones son graves
+
+`,
+      'homicidio_culposo': `${nombreUsuario}, entiendo que esta es una situación MUY DIFÍCIL. El **homicidio culposo en accidente de tránsito** es un delito grave que requiere asesoría legal INMEDIATA.
+
+⚖️ **MARCO LEGAL:**
+• **Código Penal:** Homicidio culposo = muerte causada sin intención
+• **Pena:** 2-7 años de prisión (puede reducirse con atenuantes)
+• **Agravantes:** Alcohol, drogas, exceso de velocidad, fuga
+
+📋 **QUÉ HACER AHORA:**
+
+1️⃣ **BUSCA UN ABOGADO PENALISTA INMEDIATAMENTE**
+   • No declares nada sin tu abogado presente
+   • Es tu derecho constitucional
+
+2️⃣ **NO HUYAS**
+   • La fuga convierte el delito en MÁS GRAVE
+   • Quédate en el lugar hasta que lleguen autoridades
+
+3️⃣ **COOPERA CON LA AUTORIDAD**
+   • Pero ejerce tu derecho a no autoincriminarte
+   • Tu abogado te dirá qué decir y qué no
+
+4️⃣ **REPARACIÓN DEL DAÑO**
+   • Indemnización a la familia de la víctima
+   • PUEDE reducir significativamente la pena
+   • Tu seguro puede cubrir parte de esto
+
+💰 **TU SEGURO:**
+• Notifica a tu aseguradora INMEDIATAMENTE
+• Cobertura de responsabilidad civil aplica
+• Puede incluir defensa legal
+
+⚠️ **ATENUANTES QUE PUEDEN REDUCIR LA PENA:**
+• No estabas bajo influencia de alcohol/drogas
+• Respetabas los límites de velocidad
+• No huiste
+• Ofreciste reparación del daño
+• Buen comportamiento previo
+
+🔴 **ESTO ES URGENTE:**
+Busca asesoría legal especializada HOY. No enfrentes esto solo.
+
+`,
+      'mordida_corrupcion': `${nombreUsuario}, si un oficial te está pidiendo **"mordida"** o dinero irregular:
+
+🚨 **TUS DERECHOS:**
+• NUNCA estás obligado a pagar en efectivo al oficial
+• TODO pago debe ser mediante boleta oficial en banco
+• Puedes grabar la interacción (es legal en vía pública)
+
+📋 **QUÉ HACER EN EL MOMENTO:**
+
+1️⃣ **MANTÉN LA CALMA**
+   • No confrontes agresivamente
+   • Sé firme pero respetuoso
+
+2️⃣ **PIDE IDENTIFICACIÓN**
+   • Nombre completo y número de placa
+   • Unidad a la que pertenece
+
+3️⃣ **SOLICITA BOLETA OFICIAL**
+   • "Oficial, prefiero la boleta para pagar en el banco"
+   • Si no hay infracción real, no pueden multarte
+
+4️⃣ **GRABA SI ES POSIBLE**
+   • Es tu derecho en vía pública
+   • Puede ser evidencia si decides denunciar
+
+5️⃣ **DENUNCIA:**
+   • **089** - Línea de denuncia anónima
+   • **Contraloría Municipal** - Denuncia formal
+   • **CEDH** - Comisión de Derechos Humanos
+
+⚠️ **SI CEDISTE Y PAGASTE:**
+Aún puedes denunciar después:
+• Anota fecha, hora, lugar, descripción del oficial
+• Denuncia en Contraloría o Asuntos Internos
+
+💡 **PREVENCIÓN:**
+• Lleva siempre tus documentos en regla
+• Conoce tus derechos
+• Graba todo cuando te detengan
+
+`,
+      'retiro_llaves': `${nombreUsuario}, si un oficial te **quitó las llaves** del vehículo:
+
+🚨 **ESTO ES ILEGAL:**
+Los oficiales de tránsito **NO tienen facultad** para quitarte las llaves de tu vehículo.
+
+⚖️ **LO QUE SÍ PUEDEN HACER:**
+• Pedirte documentos (licencia, tarjeta, seguro)
+• Multarte con boleta oficial
+• Solicitar grúa para remolcar (en infracciones graves)
+• Retenerte brevemente para verificar documentos
+
+❌ **LO QUE NO PUEDEN HACER:**
+• Quitarte las llaves
+• Subirse a tu vehículo sin tu permiso
+• Retenerte indefinidamente
+• Pedirte dinero en efectivo
+
+📋 **QUÉ HACER:**
+
+1️⃣ **GRABA LA INTERACCIÓN**
+   • Es evidencia de abuso de autoridad
+
+2️⃣ **PIDE IDENTIFICACIÓN**
+   • Nombre, número de placa, unidad
+
+3️⃣ **LLAMA AL 089**
+   • Reporta el abuso en el momento
+
+4️⃣ **SOLICITA PRESENCIA DE SUPERVISOR**
+   • Tienes derecho a que venga un superior
+
+5️⃣ **DENUNCIA FORMAL:**
+   • Contraloría Municipal
+   • Comisión de Derechos Humanos (CEDH)
+   • Asuntos Internos de la corporación
+
+⚠️ **IMPORTANTE:**
+No forcejees ni intentes recuperar las llaves físicamente. Documenta todo y denuncia después.
+
+`,
+      'operativo_alcoholimetro': `${nombreUsuario}, sobre los **operativos de alcoholímetro**:
+
+📊 **LÍMITES LEGALES:**
+• **0.4 g/L en sangre** = Límite máximo permitido
+• Equivale aproximadamente a 1-2 cervezas (varía por persona)
+• **Tolerancia cero** para menores de edad y conductores de transporte público
+
+🚨 **CONSECUENCIAS SI DAS POSITIVO:**
+
+| Nivel de alcohol | Consecuencia |
+|------------------|--------------|
+| 0.4 - 0.8 g/L | Multa + arresto 20-36 hrs + corralón |
+| 0.8 - 1.5 g/L | Multa mayor + arresto + suspensión licencia 1 año |
+| Más de 1.5 g/L | Multa máxima + arresto + suspensión 3 años + posible proceso penal |
+
+✅ **TUS DERECHOS EN EL OPERATIVO:**
+• Ver que el alcoholímetro esté calibrado (sello y fecha)
+• Solicitar una segunda prueba
+• Negarte a la prueba (pero se presume positivo)
+• No ser maltratado
+
+📋 **SI DAS POSITIVO:**
+1. Coopera con las autoridades
+2. Tu vehículo irá al corralón
+3. Serás trasladado al Juzgado Cívico
+4. Después del arresto, paga multa para recuperar auto
+
+💡 **RECOMENDACIONES:**
+• Si vas a beber, usa taxi o conductor designado
+• Espera al menos 1 hora por cada bebida antes de manejar
+• Come antes de beber (reduce absorción)
+
+`,
+      'daño_propiedad': `${nombreUsuario}, si **chocaste contra una propiedad** (casa, negocio, poste, etc.):
+
+📋 **QUÉ HACER INMEDIATAMENTE:**
+
+1️⃣ **NO HUYAS**
+   • Huir es delito de daño en propiedad ajena + fuga
+   • Agrava tu situación considerablemente
+
+2️⃣ **DOCUMENTA TODO**
+   • Fotos de los daños (tu auto y la propiedad)
+   • Fotos del lugar
+   • Datos de testigos
+
+3️⃣ **BUSCA AL PROPIETARIO**
+   • Intercambia datos (nombre, teléfono, INE)
+   • Si no está, deja una nota con tus datos
+
+4️⃣ **REPORTA A TU SEGURO**
+   • Cobertura de daños a terceros aplica
+   • Ellos enviarán ajustador para valorar
+
+⚖️ **TU RESPONSABILIDAD:**
+• Debes pagar la reparación de los daños causados
+• Si tienes seguro: tu aseguradora paga (menos deducible)
+• Si NO tienes seguro: pagas de tu bolsillo
+
+💰 **COSTOS COMUNES:**
+• Barda/muro: $5,000 - $50,000
+• Poste de luz: $15,000 - $80,000
+• Fachada de negocio: $10,000 - $100,000+
+
+⚠️ **SI NO PUEDES PAGAR:**
+• El afectado puede demandarte civilmente
+• Pueden embargar bienes hasta cubrir el daño
+• Busca un acuerdo de pago a plazos
+
+`,
+      'transporte_publico': `${nombreUsuario}, si tuviste un **accidente en transporte público**:
+
+⚖️ **TUS DERECHOS COMO PASAJERO:**
+• El transportista tiene **obligación de seguridad**
+• Deben contar con **seguro obligatorio** para pasajeros
+• Puedes demandar a la empresa Y al conductor
+
+📋 **QUÉ HACER:**
+
+1️⃣ **DOCUMENTA TODO:**
+• Número de unidad (económico)
+• Placas del vehículo
+• Nombre de la ruta/línea
+• Fotos del interior y exterior
+• Datos del conductor si es posible
+
+2️⃣ **BUSCA TESTIGOS:**
+• Otros pasajeros
+• Peatones
+• Pide sus datos de contacto
+
+3️⃣ **ATENCIÓN MÉDICA:**
+• Ve al doctor aunque te sientas bien
+• Guarda todos los comprobantes médicos
+• El reporte médico es evidencia importante
+
+4️⃣ **DENUNCIA:**
+• Ministerio Público (si hay lesiones)
+• Procuraduría de Protección al Consumidor
+• Secretaría de Movilidad
+
+💰 **PUEDES RECLAMAR:**
+• Gastos médicos
+• Días de incapacidad (salario perdido)
+• Daño moral (por dolor y sufrimiento)
+• Daños materiales (objetos dañados)
+
+🔴 **PLAZO:**
+Tienes hasta 2 años para demandar daños civiles.
+
+`,
+      'motocicleta': `${nombreUsuario}, sobre las **reglas para motocicletas**:
+
+📋 **OBLIGACIONES DEL MOTOCICLISTA:**
+
+🪖 **CASCO:**
+• OBLIGATORIO para conductor y acompañante
+• Debe tener certificación DOT, ECE o NOM
+• Multa por no usarlo: 10-20 días de salario (~$2,500-$5,000 MXN)
+
+📄 **DOCUMENTOS:**
+• Licencia tipo A (específica para moto)
+• Tarjeta de circulación
+• Seguro de responsabilidad civil
+• Verificación (donde aplique)
+
+🛣️ **REGLAS DE CIRCULACIÓN:**
+• Circular por carril derecho
+• NO circular entre carriles (lane splitting)
+• NO circular por banqueta o áreas peatonales
+• Luces encendidas de día y noche
+
+❌ **PROHIBICIONES:**
+• Más de un pasajero (excepto motos diseñadas para dos)
+• Sujetar objetos que impidan maniobrar
+• Circular sin ambas manos en el manubrio
+
+⚠️ **EN CASO DE ACCIDENTE:**
+• Tienes los mismos derechos que un automovilista
+• El otro conductor NO puede alegar que "la moto es más peligrosa"
+• Tu seguro debe cubrirte igual
+
+💡 **TIP:**
+Usa equipo de protección completo (guantes, botas, chamarra). En accidente, esto reduce lesiones significativamente.
+
+`,
+      'bicicleta': `${nombreUsuario}, sobre los **derechos del ciclista**:
+
+⚖️ **TUS DERECHOS:**
+• Los ciclistas tienen los **MISMOS DERECHOS** que los vehículos motorizados
+• Los autos deben guardar **1.5 metros de distancia** al rebasarte
+• Tienes derecho a usar un carril completo si es necesario
+
+📋 **TUS OBLIGACIONES:**
+• Usar ciclovía cuando exista
+• Si no hay ciclovía: circular por carril derecho
+• Usar casco (obligatorio en varios estados)
+• Luces y reflejantes de noche
+• Respetar semáforos y señales
+
+🚨 **SI TE ATROPELLAN:**
+
+1️⃣ **BUSCA ATENCIÓN MÉDICA**
+   • Aunque te sientas bien, ve al doctor
+   • Guarda todos los comprobantes
+
+2️⃣ **DOCUMENTA TODO:**
+   • Placas del vehículo
+   • Fotos del lugar y de tu bici
+   • Datos del conductor
+   • Testigos
+
+3️⃣ **DENUNCIA:**
+   • Ministerio Público si hay lesiones
+   • El conductor es responsable aunque no haya "chocado" directamente
+
+💰 **PUEDES RECLAMAR:**
+• Gastos médicos
+• Reparación o reposición de la bicicleta
+• Días de incapacidad
+• Daño moral
+
+⚠️ **IMPORTANTE:**
+El conductor de vehículo motorizado tiene MAYOR responsabilidad por el principio de "mayor masa, mayor responsabilidad".
+
+`,
+      'taxi_uber_didi': `${nombreUsuario}, sobre **accidentes en Uber/Didi/Taxi**:
+
+📋 **SI TUVISTE ACCIDENTE COMO PASAJERO:**
+
+1️⃣ **DOCUMENTA EN LA APP:**
+• Toma capturas del viaje (conductor, placa, ruta)
+• Guarda el historial del viaje
+• Reporta el incidente en la app INMEDIATAMENTE
+
+2️⃣ **BUSCA ATENCIÓN MÉDICA:**
+• Ve al doctor aunque te sientas bien
+• Guarda todos los comprobantes
+• El reporte médico es evidencia clave
+
+3️⃣ **EVIDENCIA:**
+• Fotos de los daños
+• Fotos del interior del vehículo
+• Datos del conductor
+• Testigos
+
+💰 **COBERTURAS DE LAS PLATAFORMAS:**
+
+**UBER:**
+• Seguro de accidentes personales durante el viaje
+• Cubre gastos médicos hasta cierto límite
+• Cobertura de muerte accidental
+
+**DIDI:**
+• Seguro de responsabilidad civil
+• Cobertura de gastos médicos
+• Asistencia en carretera
+
+**TAXI REGULAR:**
+• Deben tener seguro obligatorio
+• Puedes reclamar a la empresa y al conductor
+
+📍 **CÓMO RECLAMAR:**
+1. Reporta en la app con todos los detalles
+2. Contacta al soporte de la plataforma
+3. Si no responden: demanda en PROFECO
+4. Para lesiones graves: Ministerio Público
+
+⚠️ **IMPORTANTE:**
+Las plataformas tienen departamentos legales. Si tu caso es grave, busca un abogado que te asesore en la negociación.
 
 `,
       'general': `${nombreUsuario}, te puedo ayudar con información sobre **tránsito en Chiapas**.
