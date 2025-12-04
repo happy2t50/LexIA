@@ -130,6 +130,7 @@ services:
       DB_NAME: lexia_db
       DB_USER: postgres
       DB_PASSWORD: lexia_password_2024
+      OLLAMA_PREPROCESSOR_URL: http://ollama-preprocessor:3007
     ports:
       - "3004:3004"
     depends_on:
@@ -154,8 +155,8 @@ services:
       DB_PASSWORD: lexia_password_2024
       EMBEDDING_MODEL: Xenova/all-MiniLM-L6-v2
       CLUSTERING_SERVICE_URL: http://clustering:3002
-      SIMILARITY_THRESHOLD: "0.5"
-      TOP_K_RESULTS: "5"
+      SIMILARITY_THRESHOLD: "0.4"
+      TOP_K_RESULTS: "8"
     ports:
       - "3009:3009"
     volumes:
@@ -192,6 +193,8 @@ services:
       NLP_SERVICE_URL: http://nlp:3004
       CLUSTERING_SERVICE_URL: http://clustering:3002
       AUTO_GROUP_USERS: "true"
+      # Modelo por defecto
+      OLLAMA_RESPONSE_MODEL: llama3.2:1b
     ports:
       - "3010:3010"
     depends_on:
@@ -257,6 +260,18 @@ services:
       - lexia-network
     restart: unless-stopped
 
+  # Servidor Ollama (para LLM)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    networks:
+      - lexia-network
+    restart: unless-stopped
+
   # Nginx API Gateway (Reverse Proxy)
   nginx:
     image: nginx:alpine
@@ -288,6 +303,8 @@ volumes:
   postgres_data:
     driver: local
   rag_models:
+    driver: local
+  ollama:
     driver: local
 
 networks:

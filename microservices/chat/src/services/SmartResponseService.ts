@@ -2,7 +2,9 @@ import { Pool } from 'pg';
 import axios from 'axios';
 import { ForoInteligenteService, SugerenciaForo } from './ForoInteligenteService';
 import { AdaptiveLearningService } from './AdaptiveLearningService';
+import { ConversationService } from './ConversationService';
 import { slangNormalizer } from '../utils/SlangNormalizer';
+import { ollamaResponseGenerator } from './OllamaResponseGenerator';
 
 // Interfaces
 export interface ArticuloLegal {
@@ -664,12 +666,14 @@ export class SmartResponseService {
   private conversationStates: Map<string, ConversationState> = new Map();
   private foroService: ForoInteligenteService;
   private learningService: AdaptiveLearningService;
+  private conversationService: ConversationService;
 
-  constructor(pool: Pool, ragUrl: string = 'http://rag:3009') {
+  constructor(pool: Pool, ragUrl: string = 'http://rag:3009', conversationService: ConversationService) {
     this.pool = pool;
     this.ragUrl = ragUrl;
     this.foroService = new ForoInteligenteService(pool);
     this.learningService = new AdaptiveLearningService(pool);
+    this.conversationService = conversationService;
   }
 
   /**
@@ -860,7 +864,17 @@ export class SmartResponseService {
     // === PRIORIDAD 3: Otros temas específicos ===
     const temaPatterns: { [key: string]: { patterns: string[], peso: number } } = {
       'semaforo': { patterns: ['semaforo', 'semáforo', 'brinco', 'brinque', 'brincar', 'luz roja', 'pase el rojo', 'pasé el rojo', 'alto'], peso: 0.15 },
-      'accidente': { patterns: ['accidente', 'accidente', 'acidente', 'choque', 'chocaron', 'chocar', 'colision', 'colisión', 'golpe', 'impacto', 'volcadura', 'choqué', 'me chocaron', 'me pegaron', 'me dieron', 'tuve un choque', 'hubo un choque', 'me accidente', 'me accidenté', 'se fue', 'se peló', 'se pelo', 'el wey se fue', 'el man se fue', 'se dio a la fuga'], peso: 0.18 },
+      'accidente': { patterns: [
+        'accidente', 'accidente', 'acidente',
+        'choque', 'chocaron', 'chocar', 'colision', 'colisión',
+        'golpe', 'impacto', 'volcadura', 'choqué', 'me chocaron', 'me pegaron', 'me dieron',
+        'tuve un choque', 'hubo un choque', 'me accidente', 'me accidenté',
+        'se fue', 'se peló', 'se pelo', 'el wey se fue', 'el man se fue', 'se dio a la fuga',
+        // Slang y expresiones coloquiales que implican choque/colisión
+        'le di en toda', 'le di en su madre', 'le di en toda su', 'le pegue', 'le pegué', 'me lo lleve', 'me lo llevé',
+        'le lance el carro', 'le lancé el carro', 'le lanzo el carro', 'le lanzó el carro', 'le lanso el carro',
+        'avente el carro', 'aventé el carro', 'me le fui con el carro', 'me le fui encima'
+      ], peso: 0.18 },
       'atropello': { patterns: ['atropello', 'atropellado', 'atropellar', 'peaton', 'peatón', 'caminando', 'fuga', 'huyo', 'huyó', 'huir', 'escapó', 'dio a la fuga'], peso: 0.18 },
       'alcoholemia': { patterns: [
         'alcohol', 'borracho', 'ebrio', 'ebriedad', 'alcoholimetro', 'alcoholímetro', 'tomado', 
@@ -1719,7 +1733,8 @@ export class SmartResponseService {
     usuarioId: string,
     mensaje: string,
     nombreUsuario: string,
-    articulosLegales: ArticuloLegal[]
+    articulosLegales: ArticuloLegal[],
+    contextoDetectado?: any
   ): Promise<{
     respuesta: string;
     tema: string;
@@ -1933,69 +1948,93 @@ export class SmartResponseService {
     let ofrecerMatch = false;
     let ofrecerForo = false;
 
-    // === PARTE 0: EMPATÍA Y RECONOCIMIENTO EMOCIONAL ===
-    const empatia = this.generarEmpatiaContextual(tema, mensaje, nombreUsuario);
-    if (empatia) {
-      respuesta += empatia + '\n\n';
+    // === PARTE 0 y 1: DESHABILITADAS ===
+    // Ollama (con templates) ahora maneja la empatía y acciones inmediatas de forma integrada
+    // Esto evita respuestas genéricas que no detectan contextos críticos (fuga, lesiones)
+    // const empatia = this.generarEmpatiaContextual(tema, mensaje, nombreUsuario);
+    // const accionInmediata = this.generarAccionInmediata(tema, mensaje);
+
+// === PARTE 2: GENERACIÓN DE RESPUESTA CON LLM (Ollama) ===
+	// 1. Construir contexto para el LLM
+	const UMBRAL_SIMILITUD_RAG = 0.62;
+	const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
+	
+	let contextoRAG = '';
+	if (articulosRelevantes.length > 0) {
+	  contextoRAG = articulosRelevantes.map(art => 
+	    `[Fuente: ${art.fuente} - ${art.titulo}]\n${art.contenido}`
+	  ).join('\n\n---\n\n');
+	} else {
+	  // Si no hay artículos relevantes del RAG, dejar vacío para que Ollama use templates
+	  contextoRAG = '';
+	}
+
+  // Log de diagnóstico del contexto RAG
+  if (contextoRAG && contextoRAG.length > 0) {
+    const preview = contextoRAG.split(/\r?\n/).slice(0, 12).join('\n');
+    console.log(`📚 Contexto RAG (${tema}) preview:\n${preview}`);
+  } else {
+    console.log(`📚 Contexto RAG vacío para tema '${tema}'.`);
+  }
+	
+	// 2. Obtener historial de conversación (últimos 5 mensajes)
+const historial = await this.conversationService.getConversationHistory(sessionId, 5);
+const historialConversacion = historial.map((msg: any) =>
+  `${msg.rol === 'user' ? 'USUARIO' : 'LEXIA'}: ${msg.mensaje}`
+).join('\n');
+
+	// 2.5. Detectar emoción del mensaje para ajustar tono de Ollama
+	const mensajeLower = mensaje.toLowerCase();
+	const patronesEnojo = ['verga', 'puta', 'culero', 'pendejo', 'cabrón', 'chingada'];
+	const patronesPreocupacion = ['preocup', 'nerv', 'miedo', 'asust', 'qué hago'];
+	const patronesDesesperacion = ['ayuda', 'urgente', 'por favor', 'necesito'];
+	const patronesFrustración = ['no sé', 'no entiendo', 'no puedo', 'perdí'];
+
+	let emocionDetectada: 'enojado' | 'preocupado' | 'neutral' | 'frustrado' | 'desesperado' = 'neutral';
+	const cantidadGroserias = patronesEnojo.filter(p => mensajeLower.includes(p)).length;
+
+	if (cantidadGroserias >= 3) {
+	  emocionDetectada = 'enojado';
+	} else if (patronesDesesperacion.some(p => mensajeLower.includes(p))) {
+	  emocionDetectada = 'desesperado';
+	} else if (patronesPreocupacion.some(p => mensajeLower.includes(p))) {
+	  emocionDetectada = 'preocupado';
+	} else if (patronesFrustración.some(p => mensajeLower.includes(p))) {
+	  emocionDetectada = 'frustrado';
+	}
+
+	console.log(`😊 Emoción detectada para Ollama: ${emocionDetectada}`);
+
+	// 3. Generar respuesta usando Ollama con contexto emocional y tema RAG
+	console.log(`📚 Tema/Cluster RAG detectado: ${tema}`);
+
+	const respuestaLLM = await ollamaResponseGenerator.generarRespuestaSintetizada(
+	  nombreUsuario,
+	  mensaje,
+	  contextoRAG,
+	  historialConversacion,
+	  tema, // Ya se pasa el tema, pero ahora Ollama lo usará explícitamente
+	  emocionDetectada,
+	  contextoDetectado
+	);
+
+  respuesta += respuestaLLM + '\n\n';
+
+  // Añadir sección Base Legal explícita cuando haya artículos del RAG
+  if (articulosRelevantes.length > 0) {
+    respuesta += 'Base Legal:\n';
+    const maxItems = Math.min(3, articulosRelevantes.length);
+    for (let i = 0; i < maxItems; i++) {
+      const art = articulosRelevantes[i];
+      const firstLine = (art.contenido || '').split(/\r?\n/)[0].trim();
+      const resumen = firstLine.length > 0 ? firstLine : (art.titulo || 'Artículo');
+      respuesta += `• ${art.titulo}: ${resumen}\n`;
     }
+    respuesta += '\n';
+  }
 
-    // === PARTE 1: QUÉ HACER AHORA (acción inmediata) ===
-    const accionInmediata = this.generarAccionInmediata(tema, mensaje);
-    if (accionInmediata) {
-      respuesta += `🚨 **Qué hacer ahora:**\n${accionInmediata}\n\n`;
-    }
-
-    // === PARTE 2: INFORMACIÓN LEGAL ===
-    // Filtrar artículos con baja similitud (umbral 0.62 para calidad)
-    const UMBRAL_SIMILITUD_RAG = 0.62;
-    const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
-
-    if (articulosRelevantes.length > 0) {
-      const artPrincipal = articulosRelevantes[0];
-
-      // Extraer número de artículo si existe
-      const matchArt = artPrincipal.contenido.match(/art[íi]culo\s*(\d+)/i);
-      const numArticulo = matchArt ? matchArt[1] : '';
-
-      respuesta += `⚖️ **Base legal:**\n`;
-
-      if (numArticulo) {
-        respuesta += `📜 **Artículo ${numArticulo} - ${artPrincipal.fuente}**\n`;
-      } else {
-        respuesta += `📜 **${artPrincipal.titulo}**\n`;
-      }
-
-      // Contenido del artículo (limpio)
-      const contenidoLimpio = artPrincipal.contenido
-        .substring(0, 350)
-        .replace(/\s+/g, ' ')
-        .trim();
-      respuesta += `_"${contenidoLimpio}${artPrincipal.contenido.length > 350 ? '...' : ''}"_\n\n`;
-
-      // Artículos adicionales relacionados
-      if (articulosRelevantes.length > 1) {
-        respuesta += `📋 **Artículos relacionados:**\n`;
-        articulosRelevantes.slice(1, 3).forEach(art => {
-          respuesta += `• ${art.titulo}\n`;
-        });
-        respuesta += '\n';
-      }
-    } else {
-      // Sin artículos relevantes del RAG - usar conocimiento interno basado en el tema
-      const conocimientoInterno = this.generarRespuestaConocimientoInterno(tema, nombreUsuario, mensaje);
-      if (conocimientoInterno) {
-        respuesta += conocimientoInterno + '\n\n';
-      }
-    }
-
-    // === PARTE 3: PASOS DETALLADOS ===
-    if (config.pasosASeguir.length > 0) {
-      respuesta += `📋 **Pasos a seguir:**\n`;
-      config.pasosASeguir.forEach((paso, i) => {
-        respuesta += `${i + 1}. ${paso}\n`;
-      });
-      respuesta += '\n';
-    }
+// Los pasos a seguir se integran ahora en la respuesta del LLM para un flujo más natural.
+	// Se mantiene la lógica de recomendación de profesionistas y foro.
     
     // === PARTE 3: RECOMENDACIÓN DE PROFESIONISTAS ===
     // Mostrar inmediatamente en temas que requieren asesoría profesional

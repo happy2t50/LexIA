@@ -213,6 +213,96 @@ export class ForoInteligenteService {
   }
 
   /**
+   * Crear grupo automáticamente si no existe
+   */
+  private async crearGrupoSiNoExiste(cluster: string, tema: string): Promise<string> {
+    const nombreGrupo = this.getNombreGrupo(cluster, tema);
+    
+    try {
+      // Verificar si existe el grupo
+      const existeQuery = `
+        SELECT id FROM grupos_usuarios 
+        WHERE cluster = $1 AND activo = TRUE
+        LIMIT 1
+      `;
+      const existe = await this.pool.query(existeQuery, [cluster]);
+      
+      if (existe.rows.length > 0) {
+        return existe.rows[0].id;
+      }
+      
+      // Crear nuevo grupo
+      const insertQuery = `
+        INSERT INTO grupos_usuarios (cluster, nombre, descripcion, fecha_creacion)
+        VALUES ($1, $2, $3, NOW())
+        RETURNING id
+      `;
+      const result = await this.pool.query(insertQuery, [
+        cluster,
+        nombreGrupo,
+        `Grupo automático de usuarios consultando sobre ${tema}`
+      ]);
+      
+      const grupoId = result.rows[0].id;
+      console.log(`✨ Grupo creado: ${grupoId} para cluster ${cluster}`);
+      return grupoId;
+    } catch (error) {
+      console.error('Error creando grupo:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Agregar usuario al grupo automáticamente
+   */
+  private async agregarAGrupo(usuarioId: string, cluster: string, tema: string): Promise<void> {
+    try {
+      // Crear grupo si no existe
+      const grupoId = await this.crearGrupoSiNoExiste(cluster, tema);
+      
+      // Agregar usuario al grupo
+      const insertQuery = `
+        INSERT INTO grupo_miembros (grupo_id, usuario_id, fecha_union, total_participaciones, activo)
+        VALUES ($1, $2, NOW(), 1, TRUE)
+        ON CONFLICT (grupo_id, usuario_id) 
+        DO UPDATE SET 
+          total_participaciones = grupo_miembros.total_participaciones + 1,
+          activo = TRUE,
+          fecha_union = CASE WHEN grupo_miembros.fecha_union IS NULL THEN NOW() ELSE grupo_miembros.fecha_union END
+      `;
+      await this.pool.query(insertQuery, [grupoId, usuarioId]);
+      
+      // Actualizar contador de miembros del grupo
+      const updateQuery = `
+        UPDATE grupos_usuarios
+        SET total_miembros = (
+          SELECT COUNT(*) FROM grupo_miembros WHERE grupo_id = $1 AND activo = TRUE
+        )
+        WHERE id = $1
+      `;
+      await this.pool.query(updateQuery, [grupoId]);
+      
+      console.log(`👥 Usuario ${usuarioId} agregado a grupo ${grupoId} (cluster: ${cluster})`);
+    } catch (error) {
+      console.error('Error agregando usuario a grupo:', error);
+    }
+  }
+
+  /**
+   * Obtener nombre del grupo basado en cluster y tema
+   */
+  private getNombreGrupo(cluster: string, tema: string): string {
+    const nombres: Record<string, string> = {
+      'C1': 'Grupo de Accidentes de Tránsito',
+      'C2': 'Grupo de Alcoholemia',
+      'C3': 'Grupo de Multas y Infracciones',
+      'C4': 'Grupo de Documentación Vehicular',
+      'C5': 'Grupo de Estacionamiento'
+    };
+    return nombres[cluster] || `Grupo ${cluster}`;
+  }
+
+  /**
    * Registrar al usuario en el cluster correspondiente
    */
   async registrarEnCluster(usuarioId: string, tema: string): Promise<void> {
@@ -249,6 +339,9 @@ export class ForoInteligenteService {
           WHERE usuario_id = $1 AND cluster = $2
         `, [usuarioId, clusterDB, tema]);
       }
+
+      // ✨ AGRUPAMIENTO AUTOMÁTICO: Agregar usuario a grupo
+      await this.agregarAGrupo(usuarioId, clusterDB, tema);
 
       console.log(`📊 Usuario ${usuarioId} registrado en cluster: ${clusterDB} (tema: ${tema})`);
     } catch (error) {

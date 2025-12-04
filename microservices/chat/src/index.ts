@@ -13,6 +13,7 @@ import { LearningService } from './services/LearningService';
 import { KnowledgeBaseService } from './services/KnowledgeBaseService';
 import { ResponseBuilder } from './services/ResponseBuilder';
 import { SmartResponseService } from './services/SmartResponseService';
+import { legalNormalizer } from './services/LegalNormalizer';
 import { ForoService } from './services/ForoService';
 import { MensajesPrivadosService } from './services/MensajesPrivadosService';
 import { OLAPIntegrationService } from './services/OLAPIntegrationService';
@@ -87,7 +88,7 @@ const OLAP_URL = process.env.OLAP_SERVICE_URL || 'http://olap-cube:3001';
 const knowledgeBaseService = new KnowledgeBaseService(pool, RAG_URL);
 
 // Servicio de respuestas inteligentes
-const smartResponseService = new SmartResponseService(pool, RAG_URL);
+const smartResponseService = new SmartResponseService(pool, RAG_URL, conversationService);
 
 // Servicio de foro de comunidad
 const foroService = new ForoService(pool);
@@ -214,18 +215,36 @@ app.post('/message', async (req: Request, res: Response) => {
     // NORMALIZAR SLANG A LENGUAJE LEGAL ("Traductor de Barrio")
     // ============================================================
     const mensajeNormalizado = slangNormalizer.normalize(mensaje);
+    const mensajeLegalNormalizado = legalNormalizer.normalize(mensaje);
+    const contextoDetectado = legalNormalizer.detectarContexto(mensaje);
+    const consultaLegal = legalNormalizer.buildConsultaLegal(mensajeLegalNormalizado, contextoDetectado);
     const hasSlang = slangNormalizer.hasSlang(mensaje);
 
     console.log(`🔄 Traductor de Barrio:`);
     console.log(`   Original: "${mensaje}"`);
     console.log(`   Normalizado: "${mensajeNormalizado}"`);
+    console.log(`   Legal: "${mensajeLegalNormalizado}"`);
     console.log(`   Contiene slang: ${hasSlang ? 'SÍ' : 'NO'}`);
+    console.log(`📊 Contexto detectado:`);
+    console.log(`   Culpabilidad: ${contextoDetectado.culpabilidad}`);
+    console.log(`   Urgencia: ${contextoDetectado.urgencia}`);
+    console.log(`   Emoción: ${contextoDetectado.emocion}`);
+    console.log(`   Actores: ${contextoDetectado.actores.join(', ')}`);
+    if (contextoDetectado.hayHeridos) console.log(`   ⚠️ HAY HERIDOS`);
+    if (!contextoDetectado.llamoAutoridades && contextoDetectado.urgencia === 'alta') {
+      console.log(`   ⚠️ NO HA LLAMADO A AUTORIDADES`);
+    }
 
     // ============================================================
     // PRE-DETECTAR TEMA PARA MÁQUINA DE ESTADOS
     // ============================================================
     const temaPreDetectado = smartResponseService.detectarTemaPreliminar(mensajeNormalizado);
     console.log(`🎯 Tema pre-detectado: ${temaPreDetectado}`);
+
+    // Detectar tema con confianza para decidir saltar interrogador
+    const deteccionCompleta = smartResponseService.detectarTemaConConfianza(mensajeNormalizado);
+    const temasUrgentesNoInterrogador = ['accidente', 'atropello', 'alcohol', 'derechos', 'fuga_autoridad'];
+    const skipInterrogation = temasUrgentesNoInterrogador.includes(deteccionCompleta.tema);
 
     // ============================================================
     // AGENTE INTERROGADOR - Verificar si necesitamos más información
@@ -248,7 +267,7 @@ app.post('/message', async (req: Request, res: Response) => {
     }
 
     // Si necesitamos más información, hacer la pregunta al usuario
-    if (interrogationResult.necesitaMasInfo && interrogationResult.siguientePregunta) {
+    if (!skipInterrogation && interrogationResult.necesitaMasInfo && interrogationResult.siguientePregunta) {
       
       // SIEMPRE usar el formato "Javi, necesito un poco más de información para ayudarte mejor"
       let preguntaFormateada = `${shortName}, necesito un poco más de información para ayudarte mejor:\n\n`;
@@ -307,9 +326,20 @@ app.post('/message', async (req: Request, res: Response) => {
     // ============================================================
     let articulosLegales: any[] = [];
     let clusterDetectado = 'C1';
-    
-    // Enriquecer query con contexto del interrogador
-    let queryParaRAG = mensajeNormalizado;
+
+    // Enriquecer query con contexto del interrogador Y contexto emocional
+    let queryParaRAG = consultaLegal;
+
+    // Agregar tags de contexto emocional para mejor ranking en RAG
+    const contextTags: string[] = [];
+    if (contextoDetectado.urgencia === 'alta') contextTags.push('urgente');
+    if (contextoDetectado.hayHeridos) contextTags.push('lesionados graves');
+    if (contextoDetectado.culpabilidad === 'usuario_culpable') contextTags.push('responsabilidad civil');
+    if (contextoDetectado.culpabilidad === 'usuario_victima') contextTags.push('derechos víctima');
+    if (!contextoDetectado.llamoAutoridades && contextoDetectado.urgencia === 'alta') {
+      contextTags.push('debe llamar 911');
+    }
+
     if (interrogationResult.resumenContexto) {
       // Agregar palabras clave del contexto para mejorar búsqueda RAG
       const contextoParts = interrogationResult.resumenContexto
@@ -318,8 +348,18 @@ app.post('/message', async (req: Request, res: Response) => {
         .split('\n')
         .filter(p => p.trim().length > 0)
         .join(' ');
-      queryParaRAG = `${mensajeNormalizado} ${contextoParts}`;
-      console.log(`🔍 Query enriquecido para RAG: "${queryParaRAG.substring(0, 100)}..."`);
+      queryParaRAG = `${queryParaRAG} ${contextoParts}`;
+    }
+
+    // Agregar context tags al final
+    if (contextTags.length > 0) {
+      queryParaRAG = `${queryParaRAG} [contexto: ${contextTags.join(', ')}]`;
+    }
+
+    console.log(`🔍 Query para RAG (${queryParaRAG.length} chars):`);
+    console.log(`   "${queryParaRAG.substring(0, 150)}..."`);
+    if (contextTags.length > 0) {
+      console.log(`   Tags contexto: ${contextTags.join(', ')}`);
     }
     
     try {
@@ -1141,6 +1181,112 @@ app.post('/mensajes/conversacion', async (req: Request, res: Response) => {
 });
 
 // ============================================================
+// GESTIÓN DE GRUPOS (CLUSTERING AUTOMÁTICO)
+// ============================================================
+
+/**
+ * GET /user/:usuarioId/mis-grupos
+ * Obtiene todos los grupos a los que pertenece el usuario
+ */
+app.get('/user/:usuarioId/mis-grupos', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId } = req.params;
+
+    const query = `
+      SELECT 
+        gu.id,
+        gu.cluster,
+        gu.nombre,
+        gu.descripcion,
+        gu.total_miembros,
+        gu.fecha_creacion,
+        json_agg(
+          json_build_object(
+            'usuarioId', gm.usuario_id,
+            'fechaUnion', gm.fecha_union,
+            'participaciones', gm.total_participaciones
+          ) ORDER BY gm.total_participaciones DESC
+        ) FILTER (WHERE gm.usuario_id IS NOT NULL AND row_number <= 5) as miembros_preview
+      FROM grupos_usuarios gu
+      INNER JOIN grupo_miembros gm ON gu.id = gm.grupo_id AND gm.activo = TRUE
+      WHERE gm.usuario_id = $1 AND gu.activo = TRUE
+      GROUP BY gu.id, gu.cluster, gu.nombre, gu.descripcion, gu.total_miembros, gu.fecha_creacion
+      ORDER BY gm.fecha_union DESC
+    `;
+
+    const result = await pool.query(query, [usuarioId]);
+
+    res.json({
+      success: true,
+      totalGrupos: result.rows.length,
+      grupos: result.rows
+    });
+  } catch (error: any) {
+    console.error('Error obteniendo grupos del usuario:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /grupos/:grupoId/estadisticas
+ * Obtiene estadísticas del grupo incluyendo miembros y actividad
+ */
+app.get('/grupos/:grupoId/estadisticas', async (req: Request, res: Response) => {
+  try {
+    const { grupoId } = req.params;
+
+    const groupQuery = `
+      SELECT 
+        gu.id,
+        gu.cluster,
+        gu.nombre,
+        gu.descripcion,
+        gu.total_miembros,
+        gu.fecha_creacion,
+        COUNT(DISTINCT gm.usuario_id) as miembros_activos,
+        SUM(gm.total_participaciones) as total_participaciones
+      FROM grupos_usuarios gu
+      LEFT JOIN grupo_miembros gm ON gu.id = gm.grupo_id AND gm.activo = TRUE
+      WHERE gu.id = $1
+      GROUP BY gu.id, gu.cluster, gu.nombre, gu.descripcion, gu.total_miembros, gu.fecha_creacion
+    `;
+
+    const membersQuery = `
+      SELECT 
+        gm.usuario_id,
+        gm.fecha_union,
+        gm.total_participaciones,
+        gm.activo
+      FROM grupo_miembros gm
+      WHERE gm.grupo_id = $1 AND gm.activo = TRUE
+      ORDER BY gm.total_participaciones DESC
+      LIMIT 10
+    `;
+
+    const groupResult = await pool.query(groupQuery, [grupoId]);
+    const membersResult = await pool.query(membersQuery, [grupoId]);
+
+    if (groupResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Grupo no encontrado' });
+    }
+
+    const grupo = groupResult.rows[0];
+
+    res.json({
+      success: true,
+      grupo: {
+        ...grupo,
+        miembros_preview: membersResult.rows.slice(0, 5),
+        total_miembros_en_estadisticas: membersResult.rows.length
+      }
+    });
+  } catch (error: any) {
+    console.error('Error obteniendo estadísticas del grupo:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
@@ -1151,6 +1297,7 @@ app.listen(PORT, () => {
   console.log(`🎯 Integrado con Clustering: ${CLUSTERING_URL}`);
   console.log(`💬 Foro de comunidad habilitado`);
   console.log(`📨 Chat privado 1:1 habilitado`);
+  console.log(`👥 Agrupamiento automático por clusters habilitado`);
 });
 
 process.on('SIGINT', async () => {
