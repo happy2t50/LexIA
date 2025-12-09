@@ -475,4 +475,126 @@ export class ForoService {
       comentarios: parseInt(row.comentarios) || 0
     }));
   }
+
+  /**
+   * Marcar/desmarcar publicación como "No útil"
+   */
+  async toggleNoUtilPublicacion(publicacionId: string, usuarioId: string): Promise<{
+    marked: boolean;
+    totalNoUtil: number;
+  }> {
+    // Verificar si ya marcó como no útil
+    const checkQuery = `
+      SELECT 1 FROM foro_no_util WHERE publicacion_id = $1 AND usuario_id = $2
+    `;
+    const exists = await this.pool.query(checkQuery, [publicacionId, usuarioId]);
+
+    if (exists.rows.length > 0) {
+      // Quitar marca de no útil
+      await this.pool.query(
+        `DELETE FROM foro_no_util WHERE publicacion_id = $1 AND usuario_id = $2`,
+        [publicacionId, usuarioId]
+      );
+    } else {
+      // Marcar como no útil
+      await this.pool.query(
+        `INSERT INTO foro_no_util (publicacion_id, usuario_id) VALUES ($1, $2)`,
+        [publicacionId, usuarioId]
+      );
+    }
+
+    // Obtener total de marcas "no útil"
+    const countResult = await this.pool.query(
+      `SELECT COUNT(*) as total FROM foro_no_util WHERE publicacion_id = $1`,
+      [publicacionId]
+    );
+
+    return {
+      marked: exists.rows.length === 0, // Si no existía, ahora está marcado
+      totalNoUtil: parseInt(countResult.rows[0]?.total || '0')
+    };
+  }
+
+  /**
+   * Dar/quitar like a un comentario
+   */
+  async toggleLikeComentario(comentarioId: string, usuarioId: string): Promise<{
+    liked: boolean;
+    totalLikes: number;
+  }> {
+    // Verificar si ya existe el like
+    const checkQuery = `
+      SELECT 1 FROM foro_comentarios_likes WHERE comentario_id = $1 AND usuario_id = $2
+    `;
+    const exists = await this.pool.query(checkQuery, [comentarioId, usuarioId]);
+
+    if (exists.rows.length > 0) {
+      // Quitar like
+      await this.pool.query(
+        `DELETE FROM foro_comentarios_likes WHERE comentario_id = $1 AND usuario_id = $2`,
+        [comentarioId, usuarioId]
+      );
+      await this.pool.query(
+        `UPDATE foro_comentarios SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
+        [comentarioId]
+      );
+    } else {
+      // Dar like
+      await this.pool.query(
+        `INSERT INTO foro_comentarios_likes (comentario_id, usuario_id) VALUES ($1, $2)`,
+        [comentarioId, usuarioId]
+      );
+      await this.pool.query(
+        `UPDATE foro_comentarios SET likes = likes + 1 WHERE id = $1`,
+        [comentarioId]
+      );
+    }
+
+    // Obtener total de likes
+    const likesResult = await this.pool.query(
+      `SELECT likes FROM foro_comentarios WHERE id = $1`,
+      [comentarioId]
+    );
+
+    return {
+      liked: exists.rows.length === 0, // Si no existía, ahora tiene like
+      totalLikes: likesResult.rows[0]?.likes || 0
+    };
+  }
+
+  /**
+   * Obtener miembros activos de una categoría
+   */
+  async getMiembrosCategoria(categoriaId: string): Promise<Array<{
+    id: string;
+    nombre: string;
+    foto: string | null;
+    totalPublicaciones: number;
+    ultimaActividad: Date;
+  }>> {
+    const query = `
+      SELECT 
+        u.id,
+        u.nombre,
+        u.foto_perfil as foto,
+        COUNT(fp.id) as total_publicaciones,
+        MAX(fp.fecha) as ultima_actividad
+      FROM usuarios u
+      JOIN foro_publicaciones fp ON u.id = fp.usuario_id
+      WHERE fp.categoria_id = $1
+      GROUP BY u.id, u.nombre, u.foto_perfil
+      ORDER BY total_publicaciones DESC, ultima_actividad DESC
+      LIMIT 50
+    `;
+
+    const result = await this.pool.query(query, [categoriaId]);
+
+    return result.rows.map(row => ({
+      id: row.id,
+      nombre: row.nombre,
+      foto: row.foto,
+      totalPublicaciones: parseInt(row.total_publicaciones),
+      ultimaActividad: row.ultima_actividad
+    }));
+  }
 }

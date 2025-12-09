@@ -100,7 +100,7 @@ IMPORTANTE:
     const response = await axios.post(
       `${OLLAMA_URL}/api/generate`,
       {
-        model: process.env.OLLAMA_MODEL || 'llama3.2:1b',
+        model: process.env.OLLAMA_MODEL || 'llama3.2:3b',
         prompt: prompt,
         stream: false,
         options: {
@@ -149,7 +149,7 @@ IMPORTANTE:
       palabrasClave: result.palabrasClave || [],
       confianza: result.confianza || 0.8,
       latencyMs: latency,
-      model: process.env.OLLAMA_MODEL || 'llama3.2:1b'
+      model: process.env.OLLAMA_MODEL || 'llama3.2:3b'
     });
 
   } catch (error: any) {
@@ -208,5 +208,5 @@ app.post('/normalize-batch', async (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`🤖 Ollama Preprocessor corriendo en puerto ${PORT}`);
   console.log(`📡 Ollama URL: ${OLLAMA_URL}`);
-  console.log(`🧠 Modelo: ${process.env.OLLAMA_MODEL || 'llama3.2:1b'}`);
+  console.log(`🧠 Modelo: ${process.env.OLLAMA_MODEL || 'llama3.2:3b'}`);
 });

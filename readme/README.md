@@ -1,431 +1,290 @@
-# LexIA 2.0 - Sistema de Asistencia Legal con Machine Learning
+# LexIA 2.0 - Asistente Legal Inteligente
 
-Sistema completo de microservicios para asistencia legal en incidentes de tránsito, con integración de Machine Learning (Clustering), Cubo OLAP, procesamiento de lenguaje natural y **Arquitectura Hexagonal**.
+Sistema de asistencia legal basado en IA para consultas sobre tránsito y normativas vehiculares en Colombia.
 
-## 🏗️ Arquitectura
+## Inicio Rápido
 
-- ✅ **Arquitectura Hexagonal** (Puertos y Adaptadores)
-- ✅ **Microservicios** independientes y escalables
-- ✅ **PostgreSQL** para persistencia de datos
-- ✅ **Machine Learning** con K-means clustering
-- ✅ **NLP** para procesamiento de lenguaje natural
-- ✅ **OLAP** para análisis multidimensional
+### Prerequisitos
+- Docker Desktop instalado y corriendo
+- Puerto 80 disponible
 
-## Arquitectura del Sistema
-
-El sistema está compuesto por 8 microservicios independientes que se comunican entre sí vía API REST:
-
-```
-[Usuario]
-    ↓
-[Microservicio de Autenticación] (Puerto 3003)
-    ↓
-[Microservicio de NLP] (Puerto 3004)
-    ↓
-[Microservicio de Clustering ML] (Puerto 3002) ←→ [Cubo OLAP] (Puerto 3001)
-    ↓
-[Microservicio de Búsqueda] (Puerto 3005)
-    ↓
-[Microservicio de Recomendaciones] (Puerto 3006)
-    ↓
-[Microservicio de Explicación] (Puerto 3007)
-    ↓
-[Microservicio de Asistencia Geográfica] (Puerto 3008)
-```
-
-## Microservicios
-
-### 1. Cubo OLAP (Puerto 3001)
-Base de datos multidimensional para análisis de incidentes.
-
-**Funcionalidades:**
-- Almacenamiento de consultas de incidentes
-- Consultas multidimensionales (por ubicación, tiempo, cluster, etc.)
-- Generación de dataset para entrenamiento ML
-- Análisis estadístico
-
-**Endpoints principales:**
-- `POST /consultas` - Agregar nueva consulta
-- `POST /query` - Ejecutar consulta OLAP
-- `GET /dataset` - Obtener dataset completo
-- `GET /consultas/cluster/:cluster` - Consultas por cluster
-
-### 2. Clustering ML (Puerto 3002)
-Modelo de Machine Learning para clasificación de consultas.
-
-**Funcionalidades:**
-- Clasificación de consultas en 5 clusters (C1-C5)
-- Vectorización de texto (TF-IDF y embeddings)
-- Entrenamiento del modelo K-means
-- Predicción de clusters para nuevas consultas
-
-**Clusters:**
-- **C1**: Exceso de velocidad / Semáforo
-- **C2**: Estacionamiento indebido
-- **C3**: Alcoholímetro
-- **C4**: Falta de documentos
-- **C5**: Accidentes
-
-**Endpoints principales:**
-- `POST /predict` - Predecir cluster para consulta
-- `POST /train` - Entrenar modelo
-- `GET /clusters` - Obtener información de clusters
-- `GET /metrics` - Métricas del modelo
-
-### 3. Autenticación (Puerto 3003)
-Gestión de usuarios y autenticación JWT.
-
-**Funcionalidades:**
-- Registro de usuarios
-- Login con JWT
-- Verificación de tokens
-- Gestión de perfiles
-
-**Endpoints principales:**
-- `POST /register` - Registrar usuario
-- `POST /login` - Iniciar sesión
-- `POST /verify` - Verificar token
-- `GET /profile` - Obtener perfil
-
-### 4. NLP (Puerto 3004)
-Procesamiento de lenguaje natural.
-
-**Funcionalidades:**
-- Normalización de texto
-- Tokenización
-- Extracción de entidades (lugares, fechas, números)
-- Clasificación de intención
-- Análisis de sentimiento
-
-**Endpoints principales:**
-- `POST /process` - Procesar consulta completa
-- `POST /sentiment` - Análisis de sentimiento
-
-### 5. Búsqueda (Puerto 3005)
-Motor de búsqueda de artículos legales.
-
-**Funcionalidades:**
-- Búsqueda difusa de artículos legales
-- Filtrado por cluster y categoría
-- Base de conocimiento legal
-
-**Endpoints principales:**
-- `POST /search` - Buscar artículos
-- `GET /search/cluster/:cluster` - Artículos por cluster
-- `GET /articles` - Todos los artículos
-
-### 6. Recomendaciones (Puerto 3006)
-Sistema de recomendación de abogados y servicios.
-
-**Funcionalidades:**
-- Recomendación de abogados especializados
-- Servicios complementarios (grúas, talleres, seguros)
-- Filtrado por ubicación y cluster
-
-**Endpoints principales:**
-- `POST /recommend` - Recomendaciones por cluster
-- `POST /recommend/personalized` - Recomendación personalizada
-- `GET /lawyers` - Lista de abogados
-- `GET /services` - Servicios complementarios
-
-### 7. Explicación (Puerto 3007)
-Generación de explicaciones legales.
-
-**Funcionalidades:**
-- Explicaciones predefinidas por cluster
-- Integración con ChatGPT (fallback)
-- Análisis completo de consultas
-
-**Endpoints principales:**
-- `POST /explain` - Explicación por cluster
-- `POST /explain/ai` - Explicación con IA
-- `POST /analyze` - Análisis completo
-
-### 8. Asistencia Geográfica (Puerto 3008)
-Localización de dependencias gubernamentales.
-
-**Funcionalidades:**
-- Búsqueda de dependencias cercanas
-- Cálculo de distancias
-- Recomendaciones geográficas por cluster
-- Tipos: policía, juzgados, tránsito, fiscalía, hospitales, patios de grúas
-
-**Endpoints principales:**
-- `POST /nearby` - Dependencias cercanas
-- `GET /dependencies` - Todas las dependencias
-- `POST /route` - Calcular ruta
-
-## Instalación
-
-### Requisitos Previos
-- Node.js 18+
-- npm o yarn
-- TypeScript
-
-### Instalación de Dependencias
-
-Para cada microservicio, ejecutar:
+### Levantar el Sistema
 
 ```bash
-cd microservices/[nombre-microservicio]
-npm install
+# Clonar el repositorio
+git clone <repository-url>
+cd LexIA2.0
+
+# Iniciar todos los servicios
+docker-compose up -d
+
+# Verificar que todo esté corriendo
+docker-compose ps
 ```
 
-### Configuración
+### Acceder al Sistema
 
-Copiar los archivos `.env.example` a `.env` en cada microservicio y configurar las variables:
+**API Gateway**: `http://localhost`
+
+Todos los servicios están disponibles a través del API Gateway:
+- Chat: `http://localhost/api/chat/`
+- RAG: `http://localhost/api/rag/`
+- NLP: `http://localhost/api/nlp/`
+- Auth: `http://localhost/api/auth/`
+- Clustering: `http://localhost/api/clustering/`
+- OLAP: `http://localhost/api/olap/`
+
+### Ejemplo de Uso
 
 ```bash
-cp .env.example .env
+# 1. Crear una sesión de chat
+curl -X POST http://localhost/api/chat/session/start \
+  -H "Content-Type: application/json" \
+  -d '{"usuarioId":"550e8400-e29b-41d4-a716-446655440000","nombre":"María"}'
+
+# 2. Enviar un mensaje
+curl -X POST http://localhost/api/chat/message \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId":"<session-id>",
+    "mensaje":"Me multaron por estacionarme mal",
+    "usuarioId":"550e8400-e29b-41d4-a716-446655440000",
+    "nombre":"María"
+  }'
 ```
 
-**Variables importantes:**
-- `PORT`: Puerto del microservicio
-- `OPENAI_API_KEY`: API key de OpenAI (solo para servicio de explicación)
-- URLs de otros microservicios para comunicación
+## Arquitectura
 
-## Ejecución
+```
+Cliente/Frontend
+       ↓
+🌐 Nginx API Gateway (Puerto 80)
+       ↓
+   ┌───┴────┬─────────┬──────────┬──────┬──────┬──────┐
+   ↓        ↓         ↓          ↓      ↓      ↓      ↓
+PostgreSQL Auth    OLAP    Clustering NLP   RAG   Chat
+  :5432   :3003    :3001      :3002   :3004  :3009 :3010
+```
 
-### Modo Desarrollo
+### Servicios
 
-Ejecutar cada microservicio en modo desarrollo:
+| Servicio | Puerto | Función |
+|----------|--------|---------|
+| **Nginx** | 80 | API Gateway - Punto único de entrada |
+| **PostgreSQL** | 5432 | Base de datos principal + pgvector |
+| **Chat** | 3010 | Orquestador principal del sistema |
+| **RAG** | 3009 | Búsqueda semántica con embeddings locales |
+| **NLP** | 3004 | Procesamiento de lenguaje natural |
+| **Clustering** | 3002 | Machine Learning - K-means clustering |
+| **OLAP** | 3001 | Data warehouse y métricas |
+| **Auth** | 3003 | Autenticación y autorización |
+
+## Tecnologías
+
+- **Backend**: Node.js + TypeScript + Express
+- **Base de Datos**: PostgreSQL 16 + pgvector
+- **ML/AI**:
+  - Transformers.js (@xenova/transformers) - Embeddings locales
+  - Natural.js - NLP
+  - K-means clustering
+- **Proxy**: Nginx (Alpine)
+- **Contenedores**: Docker + Docker Compose
+
+## Características Principales
+
+- ✅ **100% Local** - No depende de APIs externas (OpenAI, etc.)
+- ✅ **Búsqueda Semántica** - RAG con embeddings de 384 dimensiones
+- ✅ **Clustering Inteligente** - Categorización automática de consultas
+- ✅ **NLP en Español** - Análisis de sentimiento e intención
+- ✅ **API Gateway** - Nginx como reverse proxy
+- ✅ **Microservicios** - Arquitectura escalable
+- ✅ **Base de Datos Vectorial** - pgvector para similitud coseno
+
+## Documentación
+
+Toda la documentación está organizada en la carpeta [`readme/`](readme/):
+
+### 🚀 Guías de Inicio
+- [**INICIO_RAPIDO.md**](readme/INICIO_RAPIDO.md) - ⭐ Guía completa de inicio rápido (15-20 min)
+- [**QUICK_START.md**](readme/QUICK_START.md) - Guía rápida de inicio
+- [**DOCKER_GUIDE.md**](readme/DOCKER_GUIDE.md) - Guía completa de Docker
+- [**INICIAR_DOCKER.md**](readme/INICIAR_DOCKER.md) - Instrucciones para iniciar Docker
+
+### 🔐 Autenticación y Seguridad
+- [**GUIA_CONFIGURACION_AUTH.md**](readme/GUIA_CONFIGURACION_AUTH.md) - ⭐ Configurar OAuth2 Google y Email
+- [**AUTH_SYSTEM_DESIGN.md**](readme/AUTH_SYSTEM_DESIGN.md) - Diseño del sistema de autenticación
+- [**MSTG_COMPLIANCE.md**](readme/MSTG_COMPLIANCE.md) - Cumplimiento de normas MSTG
+- [**MSTG_BACKEND_ACTIVO.md**](readme/MSTG_BACKEND_ACTIVO.md) - ⭐ Normas MSTG activas en backend
+
+### 📚 API y Servicios
+- [**API_GATEWAY.md**](readme/API_GATEWAY.md) - Documentación del API Gateway (Nginx)
+- [**CHAT_SERVICE_COMPLETO.md**](readme/CHAT_SERVICE_COMPLETO.md) - Servicio de Chat
+- [**POSTGRESQL_INTEGRATION_SUMMARY.md**](readme/POSTGRESQL_INTEGRATION_SUMMARY.md) - Integración PostgreSQL
+- [**PDF_PROCESSING_FLOW.md**](readme/PDF_PROCESSING_FLOW.md) - Procesamiento de PDFs de leyes
+
+### 🏗️ Arquitectura
+- [**ARCHITECTURE.md**](readme/ARCHITECTURE.md) - Arquitectura general del sistema
+- [**ARQUITECTURA_ACTUALIZADA.md**](readme/ARQUITECTURA_ACTUALIZADA.md) - Arquitectura actualizada
+- [**ARQUITECTURA_CHAT_INTELIGENTE.md**](readme/ARQUITECTURA_CHAT_INTELIGENTE.md) - Chat inteligente
+- [**HEXAGONAL_ARCHITECTURE.md**](readme/HEXAGONAL_ARCHITECTURE.md) - Patrón hexagonal
+- [**GUIA_REPOSITORIOS.md**](readme/GUIA_REPOSITORIOS.md) - ⭐ Estructura de código y repositorios
+
+### 🚀 Despliegue
+- [**DEPLOY_COMPLETADO.md**](readme/DEPLOY_COMPLETADO.md) - Resumen del despliegue Docker
+- [**POSTGRESQL_SETUP.md**](readme/POSTGRESQL_SETUP.md) - Configuración de PostgreSQL
+- [**SETUP_POSTGRESQL_RAG.md**](readme/SETUP_POSTGRESQL_RAG.md) - Setup RAG + PostgreSQL
+
+### 📊 Implementación
+- [**RESUMEN_IMPLEMENTACION.md**](readme/RESUMEN_IMPLEMENTACION.md) - Resumen de implementación
+- [**STATUS_CHAT_INTELIGENTE.md**](readme/STATUS_CHAT_INTELIGENTE.md) - Estado del chat
+- [**SESSION_SUMMARY.md**](readme/SESSION_SUMMARY.md) - Resumen de sesiones
+- [**CLEANUP_PLAN.md**](readme/CLEANUP_PLAN.md) - Plan de limpieza
+- [**RESUMEN_LIMPIEZA.md**](readme/RESUMEN_LIMPIEZA.md) - Resumen de limpieza
+
+### 📑 Índice Completo
+- [**INDEX.md**](readme/INDEX.md) - Índice de toda la documentación
+
+## Comandos Útiles
 
 ```bash
-cd microservices/[nombre-microservicio]
-npm run dev
+# Iniciar todos los servicios
+docker-compose up -d
+
+# Ver logs de un servicio específico
+docker logs lexia-chat -f
+docker logs lexia-rag -f
+docker logs lexia-nginx -f
+
+# Ver estado de todos los servicios
+docker-compose ps
+
+# Reiniciar un servicio
+docker restart lexia-chat
+
+# Parar todos los servicios
+docker-compose down
+
+# Parar y eliminar volúmenes
+docker-compose down -v
+
+# Reconstruir imágenes
+docker-compose build --no-cache
+
+# Ver logs de todos los servicios
+docker-compose logs -f
 ```
 
-### Modo Producción
+## Health Checks
+
+Verificar que todos los servicios estén funcionando:
 
 ```bash
-cd microservices/[nombre-microservicio]
-npm run build
-npm start
+curl http://localhost/health                # API Gateway
+curl http://localhost/api/auth/health       # Auth Service
+curl http://localhost/api/chat/health       # Chat Service
+curl http://localhost/api/rag/health        # RAG Service
+curl http://localhost/api/nlp/health        # NLP Service
+curl http://localhost/api/clustering/health # Clustering Service
+curl http://localhost/api/olap/health       # OLAP Service
 ```
 
-### Orden de Inicio Recomendado
+## Variables de Entorno
 
-1. OLAP Cube (3001)
-2. Clustering ML (3002)
-3. Auth (3003)
-4. NLP (3004)
-5. Search (3005)
-6. Recommendations (3006)
-7. Explanation (3007)
-8. Geo Assistance (3008)
+Las variables de entorno están configuradas en `docker-compose.yml`:
 
-## Dataset
+- `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` - PostgreSQL
+- `RAG_SERVICE_URL`, `NLP_SERVICE_URL`, `CLUSTERING_SERVICE_URL` - URLs de servicios
+- `EMBEDDING_MODEL` - Modelo de embeddings (Xenova/all-MiniLM-L6-v2)
+- `JWT_SECRET` - Secret para autenticación JWT
 
-### Generar Dataset de Entrenamiento
+## Desarrollo
 
-El proyecto incluye un generador de dataset con 10,000 registros simulados:
-
-```bash
-cd dataset
-npm install
-npm run generate
-```
-
-Esto generará el archivo `training_dataset.csv` con:
-- Consultas variadas por cluster
-- Datos de ubicación (8 ciudades colombianas)
-- Metadatos (tipo de usuario, gravedad, artículos, etc.)
-
-### Estructura del Dataset
-
-| Campo | Descripción |
-|-------|-------------|
-| id | Identificador único |
-| texto_consulta | Consulta del usuario |
-| categoria_legal_original | Categoría legal |
-| ciudad_usuario | Ciudad del incidente |
-| tipo_usuario | conductor/peaton/pasajero |
-| hora_incidente | Timestamp del incidente |
-| ubicacion_lat | Latitud GPS |
-| ubicacion_lng | Longitud GPS |
-| historial_usuario | Número de consultas previas |
-| articulo_sugerido | Artículo legal aplicable |
-| gravedad_estimada | baja/media/alta |
-| cluster_asignado | C1-C5 |
-
-## Flujo de Uso del Sistema
-
-### Flujo Completo de una Consulta
-
-1. **Usuario** escribe su problema: "me pasé un semáforo en rojo"
-
-2. **Autenticación** verifica el token JWT
-
-3. **NLP** procesa el texto:
-   - Normaliza y tokeniza
-   - Extrae entidades
-   - Clasifica intención
-
-4. **Clustering ML** predice el cluster:
-   - Vectoriza el texto
-   - Aplica modelo K-means
-   - Asigna cluster (ej: C1)
-
-5. **Búsqueda** obtiene artículos legales relevantes
-
-6. **Recomendaciones** sugiere:
-   - Abogados especializados en tránsito
-   - Servicios (grúas si aplica)
-
-7. **Explicación** genera:
-   - Explicación del problema
-   - Pasos a seguir
-   - Consecuencias legales
-
-8. **Asistencia Geográfica** ubica:
-   - Juzgados cercanos
-   - Oficinas de tránsito
-   - Dependencias relevantes
-
-9. **OLAP** almacena la consulta para:
-   - Análisis posterior
-   - Reentrenamiento del modelo
-
-## Machine Learning
-
-### Modelo de Clustering
-
-**Algoritmo:** K-means
-**Alternativa:** DBSCAN (para clusters irregulares)
-
-**Características:**
-- 5 clusters predefinidos
-- Vectorización TF-IDF
-- Embeddings simulados (128 dimensiones)
-- Entrenamiento offline
-- Actualización periódica
-
-### Entrenamiento del Modelo
-
-```bash
-# Desde el microservicio de clustering
-curl -X POST http://localhost:3002/train-from-olap
-```
-
-### Métricas del Modelo
-
-```bash
-curl http://localhost:3002/metrics
-```
-
-## API Documentation
-
-### Ejemplo de Flujo Completo
-
-```javascript
-// 1. Login
-const loginResponse = await fetch('http://localhost:3003/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: 'user@example.com',
-    password: 'password'
-  })
-});
-const { token } = await loginResponse.json();
-
-// 2. Análisis completo de consulta
-const analysisResponse = await fetch('http://localhost:3007/analyze', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-  },
-  body: JSON.stringify({
-    textoConsulta: 'me pasé un semáforo en rojo',
-    usuarioId: 'user123'
-  })
-});
-
-const result = await analysisResponse.json();
-// result contiene: explicación, recomendaciones, cluster, artículos
-```
-
-## Tecnologías Utilizadas
-
-- **Backend:** Node.js + Express + TypeScript
-- **ML:** Natural (NLP), TensorFlow.js (futuro)
-- **Búsqueda:** Fuse.js
-- **Geolocalización:** Geolib
-- **Autenticación:** JWT + bcrypt
-- **IA:** OpenAI GPT (opcional)
-
-## Estructura del Proyecto
+### Estructura del Proyecto
 
 ```
 LexIA2.0/
-├── microservices/
-│   ├── olap-cube/          # Cubo OLAP
-│   ├── clustering-ml/       # Machine Learning
-│   ├── auth/               # Autenticación
-│   ├── nlp/                # Procesamiento NLP
-│   ├── search/             # Búsqueda
-│   ├── recommendations/    # Recomendaciones
-│   ├── explanation/        # Explicaciones
-│   └── geo-assistance/     # Asistencia Geográfica
-├── dataset/                # Generador de dataset
-│   ├── generate-dataset.ts
-│   └── training_dataset.csv
-└── README.md
+├── microservices/          # Microservicios
+│   ├── auth/              # Servicio de autenticación
+│   ├── chat/              # Servicio de chat (orquestador)
+│   └── IA/
+│       ├── clustering-ml/ # K-means clustering
+│       ├── nlp/          # Procesamiento de lenguaje natural
+│       ├── olap-cube/    # Data warehouse
+│       └── rag/          # Búsqueda semántica
+├── database/              # Migraciones y schemas SQL
+│   └── migrations/
+├── nginx/                 # Configuración del API Gateway
+│   └── nginx.conf
+├── readme/                # Documentación
+├── scripts/              # Scripts auxiliares
+└── docker-compose.yml    # Orquestación de contenedores
 ```
 
-## Testing
+### Agregar un Nuevo Servicio
 
+1. Crear carpeta en `microservices/`
+2. Crear Dockerfile
+3. Agregar servicio a `docker-compose.yml`
+4. Agregar ruta en `nginx/nginx.conf`
+5. Documentar en `readme/`
+
+## Troubleshooting
+
+### Puerto 80 ocupado
 ```bash
-# Ejemplo de test con curl
-curl http://localhost:3002/health
-curl -X POST http://localhost:3002/predict \
-  -H "Content-Type: application/json" \
-  -d '{"textoConsulta": "me pasé un semáforo"}'
+# Windows
+netstat -ano | findstr :80
+taskkill /PID <pid> /F
+
+# Linux/Mac
+lsof -i :80
+kill -9 <pid>
 ```
 
-## Producción
+### Servicios no inician
+```bash
+# Ver logs
+docker-compose logs
 
-### Consideraciones
+# Reiniciar todos los servicios
+docker-compose restart
 
-1. **Base de Datos:** Reemplazar almacenamiento en memoria por PostgreSQL/MongoDB
-2. **Cache:** Implementar Redis para cacheo
-3. **Load Balancer:** Nginx para distribución de carga
-4. **Monitoreo:** Prometheus + Grafana
-5. **Logs:** Winston + ELK Stack
-6. **Contenedores:** Docker + Kubernetes
-
-### Docker (Futuro)
-
-```dockerfile
-# Ejemplo de Dockerfile para cada microservicio
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
-EXPOSE 3001
-CMD ["npm", "start"]
+# Reconstruir desde cero
+docker-compose down -v
+docker-compose build --no-cache
+docker-compose up -d
 ```
 
-## Contribución
+### Error de conexión a PostgreSQL
+```bash
+# Verificar que PostgreSQL esté healthy
+docker ps | grep postgres
+
+# Ver logs de PostgreSQL
+docker logs lexia-postgres
+
+# Reiniciar PostgreSQL
+docker restart lexia-postgres
+```
+
+## Contribuir
 
 1. Fork el proyecto
-2. Crear rama feature (`git checkout -b feature/nueva-funcionalidad`)
+2. Crear una rama (`git checkout -b feature/nueva-funcionalidad`)
 3. Commit cambios (`git commit -m 'Agregar nueva funcionalidad'`)
 4. Push a la rama (`git push origin feature/nueva-funcionalidad`)
-5. Crear Pull Request
+5. Abrir Pull Request
 
 ## Licencia
 
-MIT License
+[Especificar licencia]
 
 ## Contacto
 
-Para soporte o consultas sobre el proyecto, contactar al equipo de desarrollo.
+[Información de contacto]
 
 ---
 
-**Versión:** 2.0
-**Última actualización:** 2025
+**Versión**: 2.0
+**Última actualización**: 2025-11-26
+**Estado**: ✅ Producción Ready

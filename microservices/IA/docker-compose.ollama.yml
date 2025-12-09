@@ -34,8 +34,8 @@ services:
       - "3007:3007"
     environment:
       - PORT=3007
-      - OLLAMA_URL=http://host.docker.internal:11434
-      - OLLAMA_MODEL=llama3.2:1b
+      - OLLAMA_URL=http://lexia-ollama:11434
+      - OLLAMA_MODEL=llama3.2:3b
     # depends_on:
     #   - ollama
     restart: unless-stopped

@@ -193,8 +193,11 @@ services:
       NLP_SERVICE_URL: http://nlp:3004
       CLUSTERING_SERVICE_URL: http://clustering:3002
       AUTO_GROUP_USERS: "true"
+      # Ollama LLM (running in Docker container)
+      OLLAMA_URL: http://lexia-ollama:11434
+      USE_OLLAMA: "true"
       # Modelo por defecto
-      OLLAMA_RESPONSE_MODEL: llama3.2:1b
+      OLLAMA_RESPONSE_MODEL: llama3.2:3b
     ports:
       - "3010:3010"
     depends_on:
@@ -261,9 +264,9 @@ services:
     restart: unless-stopped
 
   # Servidor Ollama (para LLM)
-  ollama:
+  lexia-ollama:
     image: ollama/ollama:latest
-    container_name: ollama
+    container_name: lexia-ollama
     ports:
       - "11434:11434"
     volumes:

@@ -61,7 +61,7 @@ const TEMA_CONFIG: { [key: string]: {
 }} = {
   'fuga_autoridad': {
     pasosASeguir: [
-      '⚠️ URGENTE: Si aún no te han identificado, consulta con un abogado ANTES de actuar',
+      'URGENTE: Si aún no te han identificado, consulta con un abogado ANTES de actuar',
       'NO intentes huir de nuevo - esto agrava la situación considerablemente',
       'Reúne toda la evidencia del momento (hora, lugar, motivo de la detención)',
       'Si tienes dashcam o video, guárdalo - puede ser evidencia importante',
@@ -455,7 +455,7 @@ const TEMA_CONFIG: { [key: string]: {
   },
   'lesiones_accidente': {
     pasosASeguir: [
-      '⚠️ URGENTE: Llama al 911 inmediatamente si hay heridos',
+      'URGENTE: Llama al 911 inmediatamente si hay heridos',
       'NO muevas a los heridos a menos que haya peligro inminente (fuego, etc.)',
       'El accidente con lesionados REQUIERE Ministerio Público',
       'Tu seguro debe cubrir gastos médicos del tercero (si tienes cobertura amplia)',
@@ -472,7 +472,7 @@ const TEMA_CONFIG: { [key: string]: {
   },
   'homicidio_culposo': {
     pasosASeguir: [
-      '⚠️ SITUACIÓN MUY GRAVE: Contacta un abogado penalista INMEDIATAMENTE',
+      'SITUACIÓN MUY GRAVE: Contacta un abogado penalista INMEDIATAMENTE',
       'NO hagas declaraciones sin tu abogado presente',
       'El homicidio culposo por accidente de tránsito tiene pena de 2-7 años de prisión',
       'Tu seguro puede cubrir la reparación del daño (indemnización a la familia)',
@@ -1066,7 +1066,14 @@ export class SmartResponseService {
       'impugnar', 'apelar', 'plazo', 'dias', 'días', 'tiempo tengo', 'cuanto tiempo',
       'cuánto tiempo', 'pagar', 'infraccion', 'infracción', 'boleta', 'corralon',
       'corralón', 'grua', 'grúa', 'seguro', 'verificacion', 'verificación',
-      'semaforo', 'semáforo', 'estacionar', 'alcohol', 'alcoholimetro'
+      'semaforo', 'semáforo', 'estacionar', 'alcohol', 'alcoholimetro',
+      // SLANG MEXICANO/CHIAPANECO - Agregado para detectar contexto de tránsito
+      'poli', 'el poli', 'la poli', 'tira', 'la tira', 'chota', 'la chota',
+      'bote', 'al bote', 'tambo', 'al tambo', 'detenido', 'detención',
+      'mica', 'mi mica', 'la mica', 'papeles', 'mis papeles', 'documentos',
+      'guantera', 'cajuela', 'marihuano', 'pacheco', 'drogado', 'pedote', 'pedo',
+      'borracho', 'ebrio', 'tomado', 'alcoholizado', 'oficial', 'agente',
+      'patrulla', 'retén', 'operativo'
     ].some(p => msgLower.includes(p));
     
     if (contextoTransito) {
@@ -1092,11 +1099,11 @@ export class SmartResponseService {
    */
   generarRespuestaOffTopic(razon: string, nombreUsuario: string): string {
     const respuestas = [
-      `¡Hola ${nombreUsuario}! 😊 Mi especialidad es ayudarte con temas de **tránsito y leyes vehiculares** en Chiapas.\n\nPuedo ayudarte con:\n• Multas e infracciones\n• Accidentes de tránsito\n• Licencias y documentos\n• Derechos del conductor\n• Estacionamiento y grúas\n\n¿En qué tema de tránsito puedo ayudarte?`,
-      `${nombreUsuario}, soy **LexIA**, tu asistente especializado en **derecho de tránsito de Chiapas** 🚗⚖️\n\nParece que tu pregunta es sobre ${razon}, pero mi conocimiento está enfocado en:\n• Infracciones y multas\n• Accidentes vehiculares\n• Trámites de tránsito\n• Derechos ante autoridades\n\n¿Tienes alguna duda sobre estos temas?`,
-      `¡Hola! Aunque me encantaría ayudarte con eso, ${nombreUsuario}, mi expertise es en **leyes de tránsito** 🚦\n\nSi tienes alguna situación relacionada con:\n• Una multa o infracción\n• Un accidente\n• Documentos vehiculares\n• Tus derechos como conductor\n\n¡Estoy aquí para orientarte!`
+      `Hola ${nombreUsuario}. Mi especialidad es ayudarte con temas de **tránsito y leyes vehiculares** en Chiapas.\n\nPuedo ayudarte con:\n• Multas e infracciones\n• Accidentes de tránsito\n• Licencias y documentos\n• Derechos del conductor\n• Estacionamiento y grúas\n\n¿En qué tema de tránsito puedo ayudarte?`,
+      `${nombreUsuario}, soy **LexIA**, tu asistente especializado en **derecho de tránsito de Chiapas**.\n\nParece que tu pregunta es sobre ${razon}, pero mi conocimiento está enfocado en:\n• Infracciones y multas\n• Accidentes vehiculares\n• Trámites de tránsito\n• Derechos ante autoridades\n\n¿Tienes alguna duda sobre estos temas?`,
+      `Hola ${nombreUsuario}. Aunque me encantaría ayudarte con eso, mi expertise es en **leyes de tránsito**.\n\nSi tienes alguna situación relacionada con:\n• Una multa o infracción\n• Un accidente\n• Documentos vehiculares\n• Tus derechos como conductor\n\nEstoy aquí para orientarte.`
     ];
-    
+
     return respuestas[Math.floor(Math.random() * respuestas.length)];
   }
 
@@ -1105,13 +1112,13 @@ export class SmartResponseService {
    */
   generarPreguntaClarificacion(tema: string, nombreUsuario: string): string {
     const clarificaciones: { [key: string]: string } = {
-      'multa': `${nombreUsuario}, quiero asegurarme de entenderte bien. ¿Tu consulta es sobre:\n\n1️⃣ **Pagar una multa** - dónde y cómo pagarla\n2️⃣ **Impugnar una multa** - crees que fue injusta\n3️⃣ **Entender la multa** - qué significa el código o monto\n\n¿Cuál describe mejor tu situación?`,
-      'accidente': `${nombreUsuario}, para orientarte mejor sobre tu accidente, ¿podrías decirme:\n\n🚗 ¿El accidente ya ocurrió o quieres saber qué hacer si te pasa?\n🏥 ¿Hubo heridos?\n📋 ¿Ya tienes un reporte oficial?\n\nCon más detalles puedo darte pasos más específicos.`,
-      'estacionamiento': `${nombreUsuario}, sobre tu situación de estacionamiento:\n\n🚛 ¿Se llevaron tu carro al corralón?\n🎫 ¿Te pusieron una multa por estacionar?\n❓ ¿Quieres saber dónde SÍ puedes estacionar?\n\n¿Qué describe mejor tu caso?`,
-      'derechos': `${nombreUsuario}, para ayudarte con tus derechos, cuéntame más:\n\n👮 ¿Un oficial te detuvo o multó?\n💰 ¿Te pidieron dinero de forma irregular?\n📱 ¿Quieres saber si puedes grabar?\n\n¿Qué situación enfrentas?`,
+      'multa': `${nombreUsuario}, quiero asegurarme de entenderte bien. ¿Tu consulta es sobre:\n\n1. **Pagar una multa** - dónde y cómo pagarla\n2. **Impugnar una multa** - crees que fue injusta\n3. **Entender la multa** - qué significa el código o monto\n\n¿Cuál describe mejor tu situación?`,
+      'accidente': `${nombreUsuario}, para orientarte mejor sobre tu accidente, ¿podrías decirme:\n\n• ¿El accidente ya ocurrió o quieres saber qué hacer si te pasa?\n• ¿Hubo heridos?\n• ¿Ya tienes un reporte oficial?\n\nCon más detalles puedo darte pasos más específicos.`,
+      'estacionamiento': `${nombreUsuario}, sobre tu situación de estacionamiento:\n\n• ¿Se llevaron tu carro al corralón?\n• ¿Te pusieron una multa por estacionar?\n• ¿Quieres saber dónde puedes estacionar?\n\n¿Qué describe mejor tu caso?`,
+      'derechos': `${nombreUsuario}, para ayudarte con tus derechos, cuéntame más:\n\n• ¿Un oficial te detuvo o multó?\n• ¿Te pidieron dinero de forma irregular?\n• ¿Quieres saber si puedes grabar?\n\n¿Qué situación enfrentas?`,
       'general': `${nombreUsuario}, no estoy seguro de entender tu consulta. ¿Podrías darme más detalles sobre:\n\n• ¿Qué situación de tránsito enfrentas?\n• ¿Tienes algún documento o boleta relacionado?\n• ¿Cuál es tu preocupación principal?\n\nAsí podré orientarte mejor.`
     };
-    
+
     return clarificaciones[tema] || clarificaciones['general'];
   }
 
@@ -1771,24 +1778,39 @@ export class SmartResponseService {
     console.log(`🎯 Detección: tema=${deteccion.tema}, confianza=${(deteccion.confianza * 100).toFixed(1)}%, offTopic=${deteccion.esOffTopic}`);
     
     // === CASO 1: OFF-TOPIC ===
+    // NUEVO: Ignorar off-topic si RAG encontró artículos relevantes (fallback inteligente)
     if (deteccion.esOffTopic) {
-      const respuestaOffTopic = this.generarRespuestaOffTopic(deteccion.razonOffTopic || '', nombreUsuario);
-      return {
-        respuesta: respuestaOffTopic,
-        tema: 'off_topic',
-        sugerencias: TEMA_CONFIG['off_topic'].preguntasSugeridas,
-        ofrecerMatch: false,
-        ofrecerForo: false,
-        confianza: deteccion.confianza
-      };
+      console.log(`🔍 DEBUG OFF-TOPIC: artículos disponibles = ${articulosLegales.length}`);
+
+      // Si RAG encontró artículos relevantes, ignorar la clasificación off-topic
+      // y continuar con generación normal usando Ollama
+      if (articulosLegales.length >= 3) {
+        console.log('🧠 FALLBACK INTELIGENTE: Clustering marcó off_topic pero RAG encontró artículos');
+        console.log(`→ Ignorando clasificación off_topic, procesando como consulta válida`);
+        // No retornar aquí - continuar con el flujo normal para generar respuesta con Ollama
+        deteccion.tema = 'consulta_general';  // Override tema
+        deteccion.esOffTopic = false;
+      } else {
+        console.log(`❌ Solo ${articulosLegales.length} artículos encontrados, verdaderamente off-topic`);
+        // Verdaderamente off-topic (sin artículos relevantes)
+        const respuestaOffTopic = this.generarRespuestaOffTopic(deteccion.razonOffTopic || '', nombreUsuario);
+        return {
+          respuesta: respuestaOffTopic,
+          tema: 'off_topic',
+          sugerencias: TEMA_CONFIG['off_topic'].preguntasSugeridas,
+          ofrecerMatch: false,
+          ofrecerForo: false,
+          confianza: deteccion.confianza
+        };
+      }
     }
     
     // === CASO 2: SOCIAL (saludos) ===
     if (deteccion.tema === 'social') {
       const saludos = [
-        `¡Hola ${nombreUsuario}! 👋 Soy **LexIA**, tu asistente legal de tránsito.\n\n¿En qué puedo ayudarte hoy?\n\n💡 Puedes preguntarme sobre:\n• Multas e infracciones\n• Accidentes de tránsito\n• Tus derechos como conductor\n• Documentos vehiculares`,
-        `¡Bienvenido ${nombreUsuario}! 🚗 Estoy aquí para ayudarte con cualquier duda de tránsito en Chiapas.\n\n¿Tienes alguna situación específica?`,
-        `¡Hola! 😊 ¿${nombreUsuario}, en qué tema de tránsito puedo orientarte?\n\n📋 Multas | 🚗 Accidentes | 📄 Documentos | ⚖️ Derechos`
+        `Hola ${nombreUsuario}. Soy **LexIA**, tu asistente legal de tránsito.\n\n¿En qué puedo ayudarte hoy?\n\nPuedes preguntarme sobre:\n• Multas e infracciones\n• Accidentes de tránsito\n• Tus derechos como conductor\n• Documentos vehiculares`,
+        `Bienvenido ${nombreUsuario}. Estoy aquí para ayudarte con cualquier duda de tránsito en Chiapas.\n\n¿Tienes alguna situación específica?`,
+        `Hola ${nombreUsuario}, ¿en qué tema de tránsito puedo orientarte?\n\nMultas | Accidentes | Documentos | Derechos`
       ];
       return {
         respuesta: saludos[Math.floor(Math.random() * saludos.length)],
@@ -1800,71 +1822,6 @@ export class SmartResponseService {
       };
     }
     
-    // === CASO 3: RESPUESTAS PREDEFINIDAS PARA DOCUMENTOS ===
-    // Cuando el tema es documentos y tenemos preguntas comunes, dar respuestas específicas
-    // IMPORTANTE: Esto va ANTES de pedir clarificación
-    if (deteccion.tema === 'documentos') {
-      const respuestaDocumentos = this.generarRespuestaDocumentos(mensaje, nombreUsuario);
-      if (respuestaDocumentos) {
-        return {
-          respuesta: respuestaDocumentos,
-          tema: 'documentos',
-          sugerencias: TEMA_CONFIG['documentos'].preguntasSugeridas,
-          ofrecerMatch: false,
-          ofrecerForo: false,
-          confianza: deteccion.confianza
-        };
-      }
-    }
-
-    // === CASO 3.5: RESPUESTAS PREDEFINIDAS PARA IMPUGNACIÓN ===
-    if (deteccion.tema === 'impugnacion') {
-      const respuestaImpugnacion = this.generarRespuestaImpugnacion(mensaje, nombreUsuario);
-      if (respuestaImpugnacion) {
-        return {
-          respuesta: respuestaImpugnacion,
-          tema: 'impugnacion',
-          sugerencias: TEMA_CONFIG['impugnacion'].preguntasSugeridas,
-          ofrecerMatch: true,
-          ofrecerForo: false,
-          confianza: deteccion.confianza
-        };
-      }
-    }
-
-    // === CASO 3.6: RESPUESTAS PREDEFINIDAS PARA MULTAS ===
-    if (deteccion.tema === 'multa') {
-      const respuestaMultas = this.generarRespuestaMultas(mensaje, nombreUsuario);
-      if (respuestaMultas) {
-        return {
-          respuesta: respuestaMultas,
-          tema: 'multa',
-          sugerencias: TEMA_CONFIG['multa'].preguntasSugeridas,
-          ofrecerMatch: false,
-          ofrecerForo: false,
-          confianza: deteccion.confianza
-        };
-      }
-    }
-
-    // === CASO 3.7: RESPUESTAS PREDEFINIDAS PARA ACCIDENTES ===
-    // DESHABILITADO: Ahora usamos siempre la respuesta con empatía contextual
-    // Solo para preguntas MUY específicas como "¿mi seguro cubre?"
-    /*
-    if (deteccion.tema === 'accidente' || state.temaActual === 'accidente') {
-      const respuestaAccidente = this.generarRespuestaAccidente(mensaje, nombreUsuario);
-      if (respuestaAccidente) {
-        return {
-          respuesta: respuestaAccidente,
-          tema: 'accidente',
-          sugerencias: TEMA_CONFIG['accidente'].preguntasSugeridas,
-          ofrecerMatch: true,
-          ofrecerForo: false,
-          confianza: deteccion.confianza
-        };
-      }
-    }
-    */
 
     // === CASO 4: NECESITA CLARIFICACIÓN (baja confianza) ===
     // EXCEPCIÓN: Temas urgentes NUNCA piden clarificación - dar respuesta completa de inmediato
@@ -1948,26 +1905,21 @@ export class SmartResponseService {
     let ofrecerMatch = false;
     let ofrecerForo = false;
 
-    // === PARTE 0 y 1: DESHABILITADAS ===
-    // Ollama (con templates) ahora maneja la empatía y acciones inmediatas de forma integrada
-    // Esto evita respuestas genéricas que no detectan contextos críticos (fuga, lesiones)
-    // const empatia = this.generarEmpatiaContextual(tema, mensaje, nombreUsuario);
-    // const accionInmediata = this.generarAccionInmediata(tema, mensaje);
-
-// === PARTE 2: GENERACIÓN DE RESPUESTA CON LLM (Ollama) ===
-	// 1. Construir contexto para el LLM
-	const UMBRAL_SIMILITUD_RAG = 0.62;
-	const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
+    // === GENERACIÓN DE RESPUESTA CON LLM (Ollama) ===
+  // 1. Construir contexto para el LLM
+  const UMBRAL_SIMILITUD_RAG = 0.35; // antes 0.62, bajamos para no perder artículos
+  const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
+  console.log(`📚 RAG articulos totales=${articulosLegales.length}, relevantes>=${UMBRAL_SIMILITUD_RAG} => ${articulosRelevantes.length}`);
 	
-	let contextoRAG = '';
-	if (articulosRelevantes.length > 0) {
-	  contextoRAG = articulosRelevantes.map(art => 
-	    `[Fuente: ${art.fuente} - ${art.titulo}]\n${art.contenido}`
-	  ).join('\n\n---\n\n');
-	} else {
-	  // Si no hay artículos relevantes del RAG, dejar vacío para que Ollama use templates
-	  contextoRAG = '';
-	}
+  let contextoRAG = '';
+  if (articulosRelevantes.length > 0) {
+    contextoRAG = articulosRelevantes.map(art => 
+      `[Fuente: ${art.fuente} - ${art.titulo}]\n${art.contenido}`
+    ).join('\n\n---\n\n');
+  } else {
+    // Si no hay artículos relevantes del RAG, dejar vacío para que Ollama use templates
+    contextoRAG = '';
+  }
 
   // Log de diagnóstico del contexto RAG
   if (contextoRAG && contextoRAG.length > 0) {
@@ -2022,21 +1974,17 @@ const historialConversacion = historial.map((msg: any) =>
 
   // Añadir sección Base Legal explícita cuando haya artículos del RAG
   if (articulosRelevantes.length > 0) {
-    respuesta += 'Base Legal:\n';
+    respuesta += '\n**Base Legal:**\n\n';
     const maxItems = Math.min(3, articulosRelevantes.length);
     for (let i = 0; i < maxItems; i++) {
       const art = articulosRelevantes[i];
       const firstLine = (art.contenido || '').split(/\r?\n/)[0].trim();
       const resumen = firstLine.length > 0 ? firstLine : (art.titulo || 'Artículo');
-      respuesta += `• ${art.titulo}: ${resumen}\n`;
+      respuesta += `**• ${art.titulo}**\n${resumen}\n\n`;
     }
-    respuesta += '\n';
   }
 
-// Los pasos a seguir se integran ahora en la respuesta del LLM para un flujo más natural.
-	// Se mantiene la lógica de recomendación de profesionistas y foro.
-    
-    // === PARTE 3: RECOMENDACIÓN DE PROFESIONISTAS ===
+    // === RECOMENDACIÓN DE PROFESIONISTAS ===
     // Mostrar inmediatamente en temas que requieren asesoría profesional
     const temasUrgentes = ['accidente', 'impugnacion', 'derechos', 'atropello', 'alcohol'];
     const mostrarProfesionistas = temasUrgentes.includes(tema) || state.turno >= 1;
@@ -2058,21 +2006,7 @@ const historialConversacion = historial.map((msg: any) =>
       profesionistas = await this.getTopProfesionistas(config.especialidadesAbogado);
 
       if (profesionistas.length > 0) {
-        respuesta += `\n---\n\n`;
-        respuesta += `👨‍⚖️ **Profesionistas especializados en ${config.especialidadesAbogado[0]}:**\n\n`;
-
-        // Mostrar top 3 inicialmente
-        profesionistas.slice(0, 3).forEach((prof, i) => {
-          const estrellas = '⭐'.repeat(Math.round(prof.rating));
-          respuesta += `**${i + 1}. ${prof.nombre}** ${estrellas} (${prof.rating}/5)\n`;
-          respuesta += `   🎓 ${prof.experienciaAnios} años exp. | 📍 ${prof.ciudad}\n`;
-          if (prof.verificado) respuesta += `   ✅ Verificado\n`;
-          respuesta += '\n';
-        });
-
-        respuesta += `_Toca en las tarjetas para ver perfiles completos y contactar directamente._\n`;
-
-        // Marcar que ya se ofrecieron para ESTE tema
+        // Cards se renderizan en frontend; evitamos duplicar contenido en texto
         state.temasConProfesionistasOfrecidos.push(tema);
         state.yaOfreceRecomendacion = true;
         ofrecerMatch = true;
@@ -2081,7 +2015,7 @@ const historialConversacion = historial.map((msg: any) =>
       }
     }
     
-    // === PARTE 4: RECOMENDACIÓN DE ANUNCIANTES (si aplica) ===
+    // === RECOMENDACIÓN DE ANUNCIANTES ===
     // Verificar si ya se ofrecieron anunciantes para ESTE TEMA específico
     const yaOfrecidoAnunciantesParaEsteTema = state.temasConAnunciantesOfrecidos.includes(tema);
     
@@ -2089,22 +2023,7 @@ const historialConversacion = historial.map((msg: any) =>
       anunciantes = await this.getAnunciantes(config.serviciosAnunciante);
       
       if (anunciantes.length > 0) {
-        respuesta += `\n---\n`;
-        
-        if (config.serviciosAnunciante.includes('Grua')) {
-          respuesta += `🚛 **¿Necesitas servicio de grúa?**\n`;
-        } else {
-          respuesta += `🔧 **Servicios que te pueden ayudar:**\n`;
-        }
-        
-        anunciantes.slice(0, 2).forEach(neg => {
-          respuesta += `• **${neg.nombreComercial}** (${neg.categoriaServicio})`;
-          if (neg.disponible24h) respuesta += ` - 🕐 24 hrs`;
-          respuesta += `\n`;
-          if (neg.telefono) respuesta += `  📞 ${neg.telefono}\n`;
-        });
-        
-        // Marcar que ya se ofrecieron para ESTE tema
+        // Cards se renderizan en frontend; evitamos duplicar contenido en texto
         state.temasConAnunciantesOfrecidos.push(tema);
         state.yaOfreceAnunciantes = true;
         
@@ -2112,7 +2031,7 @@ const historialConversacion = historial.map((msg: any) =>
       }
     }
     
-    // === PARTE 5: FORO INTELIGENTE (basado en clustering, no en turno) ===
+    // === FORO INTELIGENTE ===
     // Solo ofrece foro si hay usuarios/publicaciones con problemas SIMILARES
     if (!state.yaOfreceForo && tema !== 'general') {
       try {
@@ -2138,7 +2057,7 @@ const historialConversacion = historial.map((msg: any) =>
       }
     }
     
-    // === PARTE 6: CIERRE ===
+    // === CIERRE ===
     respuesta += `\n¿En qué más puedo ayudarte, ${nombreUsuario}?`;
     
     // Guardar estado actualizado

@@ -10,8 +10,6 @@ import { ResponseGenerator } from './services/ResponseGenerator';
 import { LawyerRecommendationService } from './services/LawyerRecommendationService';
 import { UserClusteringService } from './services/UserClusteringService';
 import { LearningService } from './services/LearningService';
-import { KnowledgeBaseService } from './services/KnowledgeBaseService';
-import { ResponseBuilder } from './services/ResponseBuilder';
 import { SmartResponseService } from './services/SmartResponseService';
 import { legalNormalizer } from './services/LegalNormalizer';
 import { ForoService } from './services/ForoService';
@@ -83,9 +81,6 @@ const RAG_URL = process.env.RAG_SERVICE_URL || 'http://localhost:3009';
 const NLP_URL = process.env.NLP_SERVICE_URL || 'http://localhost:3004';
 const CLUSTERING_URL = process.env.CLUSTERING_SERVICE_URL || 'http://localhost:3002';
 const OLAP_URL = process.env.OLAP_SERVICE_URL || 'http://olap-cube:3001';
-
-// Servicio de Knowledge Base
-const knowledgeBaseService = new KnowledgeBaseService(pool, RAG_URL);
 
 // Servicio de respuestas inteligentes
 const smartResponseService = new SmartResponseService(pool, RAG_URL, conversationService);
@@ -413,12 +408,12 @@ app.post('/message', async (req: Request, res: Response) => {
       articulosLegales
     );
 
-    // Si tenemos contexto del interrogador, agregarlo al inicio de la respuesta
+    // Si tenemos contexto del interrogador, agregarlo DESPUÉS para no interrumpir el saludo de Ollama
     let respuestaFinal = resultado.respuesta;
     if (interrogationResult.resumenContexto && interrogationResult.contextoCompleto) {
-      // Si hay contexto recopilado de las preguntas, mostrarlo como resumen
-      const contextoFormateado = `✅ **Entendido.** He anotado la siguiente información:\n${interrogationResult.resumenContexto}\n\n---\n\n`;
-      respuestaFinal = contextoFormateado + respuestaFinal;
+      // Mostrar contexto recopilado al final, no al inicio (para que Ollama hable primero)
+      const contextoFormateado = `\n\n---\n\n✅ **Contexto recopilado:**\n${interrogationResult.resumenContexto}`;
+      respuestaFinal = respuestaFinal + contextoFormateado;
     }
 
     console.log(`📊 Respuesta generada:`);
@@ -726,6 +721,43 @@ app.post('/session/:sessionId/close', async (req: Request, res: Response) => {
       mensaje: goodbyeMessage
     });
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Eliminar sesión (borrar todo el historial)
+app.delete('/session/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId es requerido' });
+    }
+
+    // Eliminar todos los mensajes de la sesión
+    const deleteMessagesQuery = `
+      DELETE FROM conversaciones
+      WHERE sesion_id = $1
+    `;
+    await pool.query(deleteMessagesQuery, [sessionId]);
+
+    // Eliminar la sesión
+    const deleteSessionQuery = `
+      DELETE FROM sesiones_chat
+      WHERE id = $1
+    `;
+    const result = await pool.query(deleteSessionQuery, [sessionId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Sesión no encontrada' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Sesión eliminada correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error al eliminar sesión:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1040,6 +1072,65 @@ app.get('/foro/mis-publicaciones/:usuarioId', async (req: Request, res: Response
       success: true,
       totalPublicaciones: publicaciones.length,
       publicaciones
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Marcar/desmarcar publicación como "No útil"
+app.post('/foro/publicacion/:publicacionId/no-util', async (req: Request, res: Response) => {
+  try {
+    const { publicacionId } = req.params;
+    const { usuarioId } = req.body;
+
+    if (!usuarioId) {
+      return res.status(400).json({ error: 'usuarioId es requerido' });
+    }
+
+    const resultado = await foroService.toggleNoUtilPublicacion(publicacionId, usuarioId);
+
+    res.json({
+      success: true,
+      ...resultado
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Dar/quitar like a un comentario
+app.post('/foro/comentario/:comentarioId/like', async (req: Request, res: Response) => {
+  try {
+    const { comentarioId } = req.params;
+    const { usuarioId } = req.body;
+
+    if (!usuarioId) {
+      return res.status(400).json({ error: 'usuarioId es requerido' });
+    }
+
+    const resultado = await foroService.toggleLikeComentario(comentarioId, usuarioId);
+
+    res.json({
+      success: true,
+      ...resultado
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Obtener miembros de una categoría
+app.get('/foro/categoria/:categoriaId/miembros', async (req: Request, res: Response) => {
+  try {
+    const { categoriaId } = req.params;
+
+    const miembros = await foroService.getMiembrosCategoria(categoriaId);
+
+    res.json({
+      success: true,
+      totalMiembros: miembros.length,
+      miembros
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
