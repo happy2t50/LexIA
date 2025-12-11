@@ -1,20 +1,3 @@
-/**
- * OllamaIntentInterpreter.ts
- * 
- * Usa Ollama (llama3) para interpretar respuestas ambiguas del usuario
- * durante el proceso de interrogación.
- * 
- * Cuando el usuario dice cosas como:
- * - "del semáforo por ponerse en rojo" (en vez de responder quién tuvo la culpa)
- * - "a poco se dañan esas cosas" (respuesta evasiva)
- * - "que es eso" (no entendió la pregunta)
- * 
- * Ollama ayuda a:
- * 1. Detectar si es una respuesta válida a la pregunta
- * 2. Extraer la información relevante si la hay
- * 3. Determinar si necesitamos reformular la pregunta
- */
-
 import axios from 'axios';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
@@ -31,9 +14,6 @@ export interface InterpretationResult {
 export class OllamaIntentInterpreter {
   private cache: Map<string, InterpretationResult> = new Map();
 
-  /**
-   * Interpreta la respuesta del usuario en el contexto de una pregunta específica
-   */
   async interpretarRespuesta(
     preguntaHecha: string,
     respuestaUsuario: string,
@@ -41,13 +21,13 @@ export class OllamaIntentInterpreter {
     tipoEsperado: 'si_no' | 'opciones' | 'texto' | 'numero'
   ): Promise<InterpretationResult> {
     
-    // Cache para respuestas similares
+    
     const cacheKey = `${preguntaHecha}|${respuestaUsuario}|${tipoEsperado}`;
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey)!;
     }
 
-    // Primero intentar interpretación local rápida
+    
     const localResult = this.interpretarLocalmente(respuestaUsuario, opcionesValidas, tipoEsperado);
     
     if (localResult.confianza >= 0.8) {
@@ -55,7 +35,7 @@ export class OllamaIntentInterpreter {
       return localResult;
     }
 
-    // Si no estamos seguros, usar Ollama
+    
     try {
       const ollamaResult = await this.consultarOllama(
         preguntaHecha,
@@ -72,9 +52,7 @@ export class OllamaIntentInterpreter {
     }
   }
 
-  /**
-   * Interpretación local rápida sin usar Ollama
-   */
+  
   private interpretarLocalmente(
     respuesta: string,
     opciones: string[] | null,
@@ -82,14 +60,13 @@ export class OllamaIntentInterpreter {
   ): InterpretationResult {
     const resp = respuesta.toLowerCase().trim();
 
-    // Detectar si es una pregunta del usuario (no una respuesta)
-    // Pero NO marcar como pregunta si contiene palabras de las opciones
+    
     const esPreguntaPura = (
       (resp.includes('?') || 
        resp.startsWith('que es') || 
        resp.startsWith('qué es') ||
        resp.startsWith('a poco')) &&
-      // Verificar que NO contenga ninguna de las opciones
+      
       (!opciones || !opciones.some(op => resp.includes(op.toLowerCase().substring(0, 5))))
     );
     
@@ -104,12 +81,12 @@ export class OllamaIntentInterpreter {
       };
     }
 
-    // Para tipo si_no
+    
     if (tipo === 'si_no') {
       const afirmativas = ['si', 'sí', 'sep', 'simon', 'simón', 'aja', 'ajá', 'claro', 'obvio', 'correcto', 'así es', 'efectivamente', 'afirmativo', 'tengo', 'si tengo', 'sí tengo', 'si,', 'sí,'];
       const negativas = ['no', 'nel', 'nop', 'nope', 'para nada', 'negativo', 'ni madres', 'nel pastel', 'ni de pedo', 'nah', 'nanai', 'no tengo', 'no me', 'no,'];
       
-      // Buscar al inicio o como palabra completa
+      
       const esAfirmativa = afirmativas.some(a => 
         resp === a || 
         resp.startsWith(a + ' ') || 
@@ -146,7 +123,7 @@ export class OllamaIntentInterpreter {
       }
     }
 
-    // Para tipo opciones - buscar coincidencia con opciones dadas
+    
     if (tipo === 'opciones' && opciones && opciones.length > 0) {
       for (let i = 0; i < opciones.length; i++) {
         const opcion = opciones[i].toLowerCase();
@@ -159,7 +136,7 @@ export class OllamaIntentInterpreter {
           return map[m] || m;
         });
         
-        // Coincidencia exacta
+        
         if (resp === opcion || respSimplificada === opcionSimplificada) {
           return {
             esRespuestaValida: true,
@@ -170,7 +147,7 @@ export class OllamaIntentInterpreter {
           };
         }
         
-        // Respuesta contiene la opción completa
+        
         if (resp.includes(opcion) || respSimplificada.includes(opcionSimplificada)) {
           return {
             esRespuestaValida: true,
@@ -181,11 +158,11 @@ export class OllamaIntentInterpreter {
           };
         }
         
-        // Buscar palabras clave de la opción en la respuesta
+        
         const palabrasOpcion = opcion.split(/[\s,\/]+/).filter(p => p.length > 3);
         const palabrasRespuesta = resp.split(/[\s,\/]+/);
         
-        // Si al menos una palabra clave de la opción está en la respuesta
+        
         const coincidencias = palabrasOpcion.filter(po => 
           palabrasRespuesta.some(pr => pr.includes(po) || po.includes(pr))
         );
@@ -200,7 +177,7 @@ export class OllamaIntentInterpreter {
           };
         }
         
-        // Número de opción (1, 2, 3...)
+        
         if (resp === String(i + 1) || resp === `opcion ${i + 1}` || resp === `${i + 1}.` || resp === `opción ${i + 1}`) {
           return {
             esRespuestaValida: true,
@@ -212,8 +189,7 @@ export class OllamaIntentInterpreter {
         }
       }
       
-      // Búsqueda más flexible para casos específicos
-      // Estacionamiento
+      
       if (opciones.some(o => o.toLowerCase().includes('estacionamiento'))) {
         if (resp.includes('estacion') || resp.includes('banqueta') || resp.includes('parque')) {
           const opcionEstacionamiento = opciones.find(o => o.toLowerCase().includes('estacionamiento'));
@@ -229,7 +205,7 @@ export class OllamaIntentInterpreter {
         }
       }
       
-      // Velocidad
+      
       if (opciones.some(o => o.toLowerCase().includes('velocidad'))) {
         if (resp.includes('velocidad') || resp.includes('rapido') || resp.includes('rápido') || resp.includes('correr')) {
           const opcionVelocidad = opciones.find(o => o.toLowerCase().includes('velocidad'));
@@ -245,7 +221,7 @@ export class OllamaIntentInterpreter {
         }
       }
       
-      // Semáforo/Alto
+      
       if (opciones.some(o => o.toLowerCase().includes('semáforo') || o.toLowerCase().includes('alto'))) {
         if (resp.includes('semaforo') || resp.includes('semáforo') || resp.includes('alto') || resp.includes('rojo')) {
           const opcionSemaforo = opciones.find(o => o.toLowerCase().includes('semáforo') || o.toLowerCase().includes('alto'));
@@ -261,14 +237,14 @@ export class OllamaIntentInterpreter {
         }
       }
       
-      // Advertencia vs Mordida (caso especial muy importante)
+      
       if (resp.includes('advertencia') || resp.includes('solo advertencia') || resp.includes('solo fue advertencia')) {
         const opcionAdvertencia = opciones.find(o => o.toLowerCase().includes('advertencia'));
         if (opcionAdvertencia) {
           return {
             esRespuestaValida: true,
             respuestaInterpretada: opcionAdvertencia,
-            valorExtraido: false,  // No pidieron mordida
+            valorExtraido: false,  
             tipoRespuesta: 'negativa',
             confianza: 0.9
           };
@@ -281,7 +257,7 @@ export class OllamaIntentInterpreter {
           return {
             esRespuestaValida: true,
             respuestaInterpretada: opcionMordida,
-            valorExtraido: true,  // Sí pidieron mordida
+            valorExtraido: true,  
             tipoRespuesta: 'afirmativa',
             confianza: 0.9
           };
@@ -289,15 +265,15 @@ export class OllamaIntentInterpreter {
       }
     }
 
-    // Respuestas claramente irrelevantes - solo si son cortas y sin contexto
+    
     const irrelevantes = [
       'del semaforo', 'del semáforo', 'por ponerse', 'quien sabe', 'quién sabe',
       'ni idea', 'no se que', 'no sé qué'
     ];
     
-    // Solo marcar como irrelevante si es corta Y no contiene palabras útiles
+    
     if (resp.length < 40 && irrelevantes.some(i => resp.includes(i))) {
-      // Verificar que no contenga palabras relacionadas con las opciones
+      
       const tieneContextoUtil = opciones?.some(op => {
         const palabras = op.toLowerCase().split(/\s+/);
         return palabras.some(p => p.length > 4 && resp.includes(p));
@@ -315,11 +291,9 @@ export class OllamaIntentInterpreter {
       }
     }
 
-    // Si llegamos aquí con opciones pero no encontramos coincidencia,
-    // intentar ser más permisivos antes de marcar como ambiguo
+    
     if (tipo === 'opciones' && opciones && opciones.length > 0) {
-      // Si la respuesta es larga (>50 chars), probablemente tiene info útil
-      // Buscar la opción que más coincida
+      
       let mejorCoincidencia = { indice: -1, score: 0 };
       
       for (let i = 0; i < opciones.length; i++) {
@@ -337,7 +311,7 @@ export class OllamaIntentInterpreter {
         }
       }
       
-      // Si encontramos alguna coincidencia razonable
+      
       if (mejorCoincidencia.score >= 5) {
         return {
           esRespuestaValida: true,
@@ -349,7 +323,7 @@ export class OllamaIntentInterpreter {
       }
     }
 
-    // Respuesta ambigua - no podemos determinar
+    
     return {
       esRespuestaValida: false,
       respuestaInterpretada: null,
@@ -360,9 +334,7 @@ export class OllamaIntentInterpreter {
     };
   }
 
-  /**
-   * Consultar Ollama para interpretar respuestas complejas
-   */
+  
   private async consultarOllama(
     pregunta: string,
     respuesta: string,
@@ -405,7 +377,7 @@ IMPORTANTE:
     });
 
     try {
-      // Extraer JSON de la respuesta
+
       const responseText = response.data.response || '';
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       
@@ -424,7 +396,7 @@ IMPORTANTE:
       console.error('Error parseando respuesta de Ollama:', parseError);
     }
 
-    // Fallback si no podemos parsear
+    
     return {
       esRespuestaValida: false,
       respuestaInterpretada: null,
@@ -435,9 +407,7 @@ IMPORTANTE:
     };
   }
 
-  /**
-   * Reformular una pregunta cuando el usuario no entendió
-   */
+  
   async reformularPregunta(
     preguntaOriginal: string,
     respuestaConfusa: string,
@@ -446,41 +416,41 @@ IMPORTANTE:
     
     const opcionesTexto = opciones ? `\nOpciones: ${opciones.join(' | ')}` : '';
     
-    // Intentar localmente primero con variaciones predefinidas
+    
     const reformulaciones: Record<string, string> = {
-      // Preguntas de culpabilidad
+      
       '¿De quién fue la culpa del accidente?': 
         '¿Quién causó el accidente? ¿Tú, el otro conductor, o ambos?',
       
-      // Preguntas de seguro
+      
       '¿Tienes seguro de auto vigente?': 
         '¿Tu carro tiene seguro? (el que pagas cada mes/año para cubrir accidentes)',
       
-      // Preguntas de daños
+      
       '¿Qué tan dañado quedó tu vehículo?':
         '¿Cómo quedó tu carro? ¿Solo rayones o golpes más fuertes?',
       
-      // Preguntas de heridos
+      
       '¿Hay heridos o alguna persona lesionada?':
         '¿Alguien resultó lastimado en el accidente?',
       
-      // Preguntas de alcoholemia
+      
       '¿Te hicieron la prueba de alcoholemia (soplar)?':
         '¿Te pidieron soplar en un aparato para medir el alcohol?',
       
-      // Otro conductor
+      
       '¿El otro conductor sigue ahí o se fue?':
         '¿El otro conductor se quedó o se fue/escapó del lugar?'
     };
 
-    // Buscar reformulación predefinida
+    
     for (const [original, reformulada] of Object.entries(reformulaciones)) {
       if (preguntaOriginal.includes(original.substring(0, 20))) {
         return reformulada + opcionesTexto;
       }
     }
 
-    // Si no hay reformulación predefinida, usar Ollama
+    
     try {
       const prompt = `El usuario no entendió esta pregunta: "${preguntaOriginal}"
 Su respuesta fue: "${respuestaConfusa}"
@@ -503,14 +473,12 @@ Solo devuelve la pregunta reformulada, nada más.`;
       
     } catch (error) {
       console.error('Error reformulando con Ollama:', error);
-      // Fallback: agregar clarificación básica
+      
       return `${preguntaOriginal}\n(Por favor, responde con una de las opciones)${opcionesTexto}`;
     }
   }
 
-  /**
-   * Detectar si el usuario quiere saltar el interrogatorio
-   */
+  
   detectarSaltarInterrogatorio(respuesta: string): boolean {
     const saltarPatterns = [
       'solo dime', 'sólo dime', 'dime ya', 'solo quiero saber',
@@ -523,13 +491,11 @@ Solo devuelve la pregunta reformulada, nada más.`;
     return saltarPatterns.some(p => resp.includes(p));
   }
 
-  /**
-   * Limpiar cache
-   */
+  
   limpiarCache(): void {
     this.cache.clear();
   }
 }
 
-// Instancia singleton
+
 export const ollamaIntentInterpreter = new OllamaIntentInterpreter();

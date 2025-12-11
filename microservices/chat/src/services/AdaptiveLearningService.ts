@@ -1,13 +1,3 @@
-/**
- * SERVICIO DE APRENDIZAJE ADAPTATIVO - LexIA
- * 
- * Sistema que aprende de las conversaciones para:
- * 1. Detectar patrones de preguntas exitosas
- * 2. Mejorar la detección de intenciones
- * 3. Generar respuestas más coherentes
- * 4. Adaptarse al feedback del usuario (positivo/negativo)
- */
-
 import { Pool } from 'pg';
 
 export interface PatronAprendido {

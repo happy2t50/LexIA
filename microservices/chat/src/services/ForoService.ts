@@ -29,6 +29,7 @@ export interface Publicacion {
 export interface Comentario {
   id: string;
   publicacionId: string;
+  parentId?: string | null;
   usuarioId: string;
   autorNombre: string;
   autorFoto?: string;
@@ -232,6 +233,7 @@ export class ForoService {
       SELECT 
         fc.id,
         fc.publicacion_id,
+        fc.parent_id,
         fc.usuario_id,
         u.nombre as autor_nombre,
         u.foto_perfil as autor_foto,
@@ -249,6 +251,7 @@ export class ForoService {
     const comentarios: Comentario[] = comResult.rows.map(row => ({
       id: row.id,
       publicacionId: row.publicacion_id,
+      parentId: row.parent_id || null,
       usuarioId: row.usuario_id,
       autorNombre: row.autor_nombre,
       autorFoto: row.autor_foto,
@@ -289,21 +292,23 @@ export class ForoService {
   async crearComentario(
     publicacionId: string,
     usuarioId: string,
-    contenido: string
+    contenido: string,
+    parentId?: string
   ): Promise<Comentario> {
     const query = `
-      INSERT INTO foro_comentarios (publicacion_id, usuario_id, contenido)
-      VALUES ($1, $2, $3)
+      INSERT INTO foro_comentarios (publicacion_id, usuario_id, contenido, parent_id)
+      VALUES ($1, $2, $3, $4)
       RETURNING id, fecha
     `;
 
-    const result = await this.pool.query(query, [publicacionId, usuarioId, contenido]);
+    const result = await this.pool.query(query, [publicacionId, usuarioId, contenido, parentId || null]);
     
     // Obtener el comentario completo
     const comQuery = `
       SELECT 
         fc.id,
         fc.publicacion_id,
+        fc.parent_id,
         fc.usuario_id,
         u.nombre as autor_nombre,
         u.foto_perfil as autor_foto,
@@ -321,6 +326,7 @@ export class ForoService {
     return {
       id: row.id,
       publicacionId: row.publicacion_id,
+      parentId: row.parent_id || null,
       usuarioId: row.usuario_id,
       autorNombre: row.autor_nombre,
       autorFoto: row.autor_foto,

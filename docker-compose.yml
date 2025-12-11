@@ -46,7 +46,7 @@ services:
       JWT_REFRESH_EXPIRES: 7d
 
       # OAuth2 Google (configurar con tus credenciales en .env)
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-your_google_client_id}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-928983565489-4lslvnvg8pinho1e5vdh4hv7m32kk1qk.apps.googleusercontent.com}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-your_google_client_secret}
       GOOGLE_CALLBACK_URL: http://localhost/api/auth/google/callback
 
@@ -54,8 +54,8 @@ services:
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: 587
       SMTP_SECURE: "false"
-      SMTP_USER: ${SMTP_USER:-your_smtp_email}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-your_smtp_password}
+      SMTP_USER: ${SMTP_USER:-lexia1388@gmail.com}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-ppjo mxey buhx deqi}
 
       # Frontend URL (para emails y redirects)
       FRONTEND_URL: http://localhost:3000
@@ -192,6 +192,7 @@ services:
       RAG_SERVICE_URL: http://rag:3009
       NLP_SERVICE_URL: http://nlp:3004
       CLUSTERING_SERVICE_URL: http://clustering:3002
+      OLAP_SERVICE_URL: http://olap-cube:3001
       AUTO_GROUP_USERS: "true"
       # Ollama LLM (running in Docker container)
       OLLAMA_URL: http://lexia-ollama:11434
@@ -208,6 +209,8 @@ services:
       nlp:
         condition: service_started
       clustering:
+        condition: service_started
+      olap-cube:
         condition: service_started
     networks:
       - lexia-network
@@ -271,6 +274,9 @@ services:
       - "11434:11434"
     volumes:
       - ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=30m  # Mantener modelo en memoria 30 minutos
+      - OLLAMA_NUM_PARALLEL=2   # Procesar 2 requests en paralelo
     networks:
       - lexia-network
     restart: unless-stopped

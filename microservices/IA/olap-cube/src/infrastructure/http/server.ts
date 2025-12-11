@@ -5,6 +5,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { Container } from '../config/container';
 import { createConsultaRoutes } from './routes/consultaRoutes';
+import { createTrackingRoutes } from './routes/trackingRoutes';
 
 dotenv.config();
 
@@ -35,6 +36,10 @@ export class Server {
     // Rutas de consultas
     const consultaRoutes = createConsultaRoutes(this.container.consultaController);
     this.app.use('/', consultaRoutes);
+
+    // Rutas de tracking de profesionistas
+    const trackingRoutes = createTrackingRoutes(this.container.trackingController);
+    this.app.use('/', trackingRoutes);
   }
 
   public start(): void {

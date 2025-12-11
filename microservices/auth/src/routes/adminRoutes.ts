@@ -9,7 +9,7 @@ const router = Router();
  * @desc Obtener estadísticas generales del sistema (solo admin)
  * @access Private (Admin only)
  */
-router.get('/stats', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.get('/stats', requireAdmin, async (req: Request, res: Response) => {
     try {
         // Contar usuarios activos
         const usuariosResult = await pool.query(
@@ -83,7 +83,7 @@ router.get('/stats', requireAuth, requireAdmin, async (req: Request, res: Respon
  * @desc Obtener perfiles pendientes de validación
  * @access Private (Admin only)
  */
-router.get('/pending-profiles', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.get('/pending-profiles', requireAdmin, async (req: Request, res: Response) => {
     try {
         const result = await pool.query(
             `SELECT 
@@ -115,7 +115,7 @@ router.get('/pending-profiles', requireAuth, requireAdmin, async (req: Request, 
  * @desc Obtener reportes pendientes de moderación
  * @access Private (Admin only)
  */
-router.get('/pending-reports', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.get('/pending-reports', requireAdmin, async (req: Request, res: Response) => {
     try {
         // Por ahora devolver array vacío, implementar cuando exista tabla de reportes
         res.json([]);
@@ -133,7 +133,7 @@ router.get('/pending-reports', requireAuth, requireAdmin, async (req: Request, r
  * @desc Validar o rechazar un perfil de abogado
  * @access Private (Admin only)
  */
-router.post('/validate-profile', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post('/validate-profile', requireAdmin, async (req: Request, res: Response) => {
     try {
         const { profile_id, approved } = req.body;
 
@@ -168,7 +168,7 @@ router.post('/validate-profile', requireAuth, requireAdmin, async (req: Request,
  * @desc Moderar contenido (publicaciones, comentarios, etc.)
  * @access Private (Admin only)
  */
-router.post('/moderate-content', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+router.post('/moderate-content', requireAdmin, async (req: Request, res: Response) => {
     try {
         const { content_id, action } = req.body;
 

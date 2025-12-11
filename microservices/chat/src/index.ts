@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import axios from 'axios';
 
-// Servicios
 import { ConversationService } from './services/ConversationService';
 import { ResponseGenerator } from './services/ResponseGenerator';
 import { LawyerRecommendationService } from './services/LawyerRecommendationService';
@@ -17,8 +16,6 @@ import { MensajesPrivadosService } from './services/MensajesPrivadosService';
 import { OLAPIntegrationService } from './services/OLAPIntegrationService';
 import { slangNormalizer } from './utils/SlangNormalizer';
 import { conversationStateMachine } from './services/ConversationStateMachine';
-
-// Tipos
 import { Sentimiento, Intencion, ArticuloRelevante } from './types';
 
 dotenv.config();
@@ -26,12 +23,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3010;
 
-// CORS: detrás de Nginx evitar duplicar '*' y credenciales.
-// Permitir orígenes explícitos durante desarrollo.
+
 const allowedOrigins = [
   'http://localhost',
-  'http://localhost:59471', // Flutter web dev server
-  'http://localhost:62422', // Flutter web dev server (puerto puede variar)
+  'http://localhost:59471', 
+  'http://localhost:62422', 
 ];
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
@@ -47,15 +43,14 @@ const corsOptions: cors.CorsOptions = {
   exposedHeaders: ['Content-Length'],
 };
 
-// Solo habilitar CORS en el microservicio si se solicita explícitamente.
-// En despliegue detrás de Nginx, es preferible que Nginx maneje CORS.
+
 if (process.env.USE_INTERNAL_CORS === 'true') {
   app.use(cors(corsOptions));
   app.options('*', cors(corsOptions));
 }
 app.use(express.json());
 
-// Pool de PostgreSQL
+
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -69,36 +64,32 @@ pool.on('error', (err) => {
   console.error('❌ Error en pool de PostgreSQL:', err);
 });
 
-// Inicializar servicios
+
 const conversationService = new ConversationService(pool);
 const responseGenerator = new ResponseGenerator();
 const lawyerService = new LawyerRecommendationService(pool);
 const userClusteringService = new UserClusteringService(pool);
 const learningService = new LearningService(pool);
 
-// URLs de servicios
+
 const RAG_URL = process.env.RAG_SERVICE_URL || 'http://localhost:3009';
 const NLP_URL = process.env.NLP_SERVICE_URL || 'http://localhost:3004';
 const CLUSTERING_URL = process.env.CLUSTERING_SERVICE_URL || 'http://localhost:3002';
 const OLAP_URL = process.env.OLAP_SERVICE_URL || 'http://olap-cube:3001';
 
-// Servicio de respuestas inteligentes
-const smartResponseService = new SmartResponseService(pool, RAG_URL, conversationService);
 
-// Servicio de foro de comunidad
+const smartResponseService = new SmartResponseService(pool, RAG_URL, conversationService, CLUSTERING_URL);
+
+
 const foroService = new ForoService(pool);
 
-// Servicio de mensajes privados (1:1)
+
 const mensajesPrivadosService = new MensajesPrivadosService(pool);
 
-// Servicio de integración con OLAP Cube (Analytics y ML)
+
 const olapService = new OLAPIntegrationService(OLAP_URL);
 
-// ============================================================
-// ENDPOINTS
-// ============================================================
 
-// Health check
 app.get('/health', async (req: Request, res: Response) => {
   try {
     const dbHealthy = await pool.query('SELECT NOW()');
@@ -118,7 +109,7 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 });
 
-// Iniciar nueva sesión de chat
+
 app.post('/session/start', async (req: Request, res: Response) => {
   try {
     const { usuarioId, nombre } = req.body;
@@ -127,13 +118,13 @@ app.post('/session/start', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'usuarioId es requerido' });
     }
 
-    // Crear o recuperar sesión
+    
     const session = await conversationService.getOrCreateSession(usuarioId, nombre);
 
-    // Mensaje de bienvenida
+    
     const welcomeMessage = responseGenerator.generateWelcomeMessage(nombre && nombre.trim().length > 0 ? nombre : 'Usuario');
 
-    // Guardar mensaje del sistema
+    
     await conversationService.saveMessage(
       session.id,
       usuarioId,
@@ -152,7 +143,7 @@ app.post('/session/start', async (req: Request, res: Response) => {
   }
 });
 
-// Enviar mensaje al chat
+
 app.post('/message', async (req: Request, res: Response) => {
   try {
     const { sessionId, mensaje, usuarioId, nombre } = req.body;
@@ -161,18 +152,16 @@ app.post('/message', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'sessionId, mensaje y usuarioId son requeridos' });
     }
 
-    // Guardar mensaje del usuario
+    
     await conversationService.saveMessage(sessionId, usuarioId, 'user', mensaje);
 
     const shortName = (nombre || 'Usuario').split(' ')[0];
 
-    // ============================================================
-    // DETECTAR SI ES UN SALUDO PURO (sin contenido real)
-    // ============================================================
+    
     const saludos = ['hola', 'hello', 'hi', 'buenos días', 'buenas tardes', 'buenas noches', 'hey', 'que tal', 'qué tal'];
     const msgLower = mensaje.toLowerCase().trim();
     
-    // Palabras que indican que hay contenido real (NO es solo saludo)
+    
     const palabrasContenido = [
       'licencia', 'renovar', 'multa', 'accidente', 'choque', 'policia', 'policía',
       'grua', 'grúa', 'donde', 'dónde', 'como', 'cómo', 'puedo', 'necesito', 'ayuda',
@@ -180,7 +169,7 @@ app.post('/message', async (req: Request, res: Response) => {
     ];
     const tieneContenido = palabrasContenido.some(p => msgLower.includes(p));
     
-    // Es saludo puro SOLO si: coincide con patrón de saludo, es corto (<20 chars), y NO tiene contenido
+   
     const coincideSaludo = saludos.some(s => msgLower === s || (msgLower.startsWith(s + ' ') && msgLower.length < 20));
     const esSaludo = coincideSaludo && !tieneContenido;
     
@@ -206,56 +195,50 @@ app.post('/message', async (req: Request, res: Response) => {
       });
     }
 
-    // ============================================================
-    // NORMALIZAR SLANG A LENGUAJE LEGAL ("Traductor de Barrio")
-    // ============================================================
+    
     const mensajeNormalizado = slangNormalizer.normalize(mensaje);
     const mensajeLegalNormalizado = legalNormalizer.normalize(mensaje);
     const contextoDetectado = legalNormalizer.detectarContexto(mensaje);
     const consultaLegal = legalNormalizer.buildConsultaLegal(mensajeLegalNormalizado, contextoDetectado);
     const hasSlang = slangNormalizer.hasSlang(mensaje);
 
-    console.log(`🔄 Traductor de Barrio:`);
+    console.log(` Traductor de Barrio:`);
     console.log(`   Original: "${mensaje}"`);
     console.log(`   Normalizado: "${mensajeNormalizado}"`);
     console.log(`   Legal: "${mensajeLegalNormalizado}"`);
     console.log(`   Contiene slang: ${hasSlang ? 'SÍ' : 'NO'}`);
-    console.log(`📊 Contexto detectado:`);
+    console.log(` Contexto detectado:`);
     console.log(`   Culpabilidad: ${contextoDetectado.culpabilidad}`);
     console.log(`   Urgencia: ${contextoDetectado.urgencia}`);
     console.log(`   Emoción: ${contextoDetectado.emocion}`);
     console.log(`   Actores: ${contextoDetectado.actores.join(', ')}`);
-    if (contextoDetectado.hayHeridos) console.log(`   ⚠️ HAY HERIDOS`);
+    if (contextoDetectado.hayHeridos) console.log(`    HAY HERIDOS`);
     if (!contextoDetectado.llamoAutoridades && contextoDetectado.urgencia === 'alta') {
-      console.log(`   ⚠️ NO HA LLAMADO A AUTORIDADES`);
+      console.log(`    NO HA LLAMADO A AUTORIDADES`);
     }
 
-    // ============================================================
-    // PRE-DETECTAR TEMA PARA MÁQUINA DE ESTADOS
-    // ============================================================
-    const temaPreDetectado = smartResponseService.detectarTemaPreliminar(mensajeNormalizado);
-    console.log(`🎯 Tema pre-detectado: ${temaPreDetectado}`);
+    
+    const temaPreDetectado = await smartResponseService.detectarTemaPreliminar(mensajeNormalizado);
+    console.log(` Tema pre-detectado: ${temaPreDetectado}`);
 
-    // Detectar tema con confianza para decidir saltar interrogador
-    const deteccionCompleta = smartResponseService.detectarTemaConConfianza(mensajeNormalizado);
+    
+    const deteccionCompleta = await smartResponseService.detectarTemaConConfianza(mensajeNormalizado);
     const temasUrgentesNoInterrogador = ['accidente', 'atropello', 'alcohol', 'derechos', 'fuga_autoridad'];
     const skipInterrogation = temasUrgentesNoInterrogador.includes(deteccionCompleta.tema);
 
-    // ============================================================
-    // AGENTE INTERROGADOR - Verificar si necesitamos más información
-    // ============================================================
+   
     const interrogationResult = await conversationStateMachine.procesarMensaje(
       sessionId,
       mensaje,
       temaPreDetectado
     );
 
-    console.log(`🤔 Agente Interrogador:`);
+    console.log(` Agente Interrogador:`);
     console.log(`   Estado actual: ${interrogationResult.estadoActual}`);
     console.log(`   Necesita más info: ${interrogationResult.necesitaMasInfo}`);
     console.log(`   Puede consultar RAG: ${interrogationResult.puedeConsultarRAG}`);
     if (interrogationResult.noEntendioRespuesta) {
-      console.log(`   ⚠️ No entendió la respuesta, intento ${interrogationResult.intentoActual}/${interrogationResult.maxIntentos}`);
+      console.log(`    No entendió la respuesta, intento ${interrogationResult.intentoActual}/${interrogationResult.maxIntentos}`);
     }
     if (interrogationResult.resumenContexto) {
       console.log(`   Contexto: ${interrogationResult.resumenContexto}`);
@@ -269,12 +252,12 @@ app.post('/message', async (req: Request, res: Response) => {
       
       // Si no entendió la respuesta anterior, agregar aclaración
       if (interrogationResult.noEntendioRespuesta) {
-        preguntaFormateada += `🤔 _No entendí tu respuesta anterior, déjame reformular:_\n\n`;
+        preguntaFormateada += ` _No entendí tu respuesta anterior, déjame reformular:_\n\n`;
       }
       
-      preguntaFormateada += `❓ **${interrogationResult.siguientePregunta}**`;
+      preguntaFormateada += ` **${interrogationResult.siguientePregunta}**`;
       
-      // Formatear opciones si las hay
+      
       let respuestaConOpciones = preguntaFormateada;
       if (interrogationResult.opcionesSugeridas && interrogationResult.opcionesSugeridas.length > 0) {
         respuestaConOpciones += '\n\n📌 **Opciones:**\n';
@@ -283,7 +266,7 @@ app.post('/message', async (req: Request, res: Response) => {
         });
       }
 
-      // Guardar pregunta del sistema
+      
       await conversationService.saveMessage(
         sessionId,
         usuarioId,
@@ -316,16 +299,14 @@ app.post('/message', async (req: Request, res: Response) => {
       });
     }
 
-    // ============================================================
-    // BUSCAR EN RAG (usando texto NORMALIZADO + contexto recopilado)
-    // ============================================================
+  
     let articulosLegales: any[] = [];
     let clusterDetectado = 'C1';
 
-    // Enriquecer query con contexto del interrogador Y contexto emocional
+    
     let queryParaRAG = consultaLegal;
 
-    // Agregar tags de contexto emocional para mejor ranking en RAG
+    
     const contextTags: string[] = [];
     if (contextoDetectado.urgencia === 'alta') contextTags.push('urgente');
     if (contextoDetectado.hayHeridos) contextTags.push('lesionados graves');
@@ -338,7 +319,7 @@ app.post('/message', async (req: Request, res: Response) => {
     if (interrogationResult.resumenContexto) {
       // Agregar palabras clave del contexto para mejorar búsqueda RAG
       const contextoParts = interrogationResult.resumenContexto
-        .replace('📋 CONTEXTO RECOPILADO:', '')
+        .replace(' CONTEXTO RECOPILADO:', '')
         .replace(/•/g, '')
         .split('\n')
         .filter(p => p.trim().length > 0)
@@ -358,12 +339,21 @@ app.post('/message', async (req: Request, res: Response) => {
     }
     
     try {
-      const ragResponse = await axios.post(`${RAG_URL}/search-smart`, {
+      console.log(`🔍 Llamando RAG en: ${RAG_URL}/search`);
+      console.log(`   Query: "${queryParaRAG.substring(0, 100)}..."`);
+      
+      const ragResponse = await axios.post(`${RAG_URL}/search`, {
         query: queryParaRAG,
-        usuarioId
+        topK: 8
+      }, {
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
       });
       
-      clusterDetectado = ragResponse.data.clusterDetectado || 'C1';
+      console.log(`✅ RAG respondió con status ${ragResponse.status}`);
+      console.log(`   Chunks: ${ragResponse.data.chunksRecuperados?.length || 0}`);
+      
+      clusterDetectado = 'C6'; 
       const chunksRecuperados = ragResponse.data.chunksRecuperados || [];
       
       articulosLegales = chunksRecuperados
@@ -377,13 +367,16 @@ app.post('/message', async (req: Request, res: Response) => {
         
       console.log(`📚 RAG encontró ${articulosLegales.length} artículos relevantes`);
       
-    } catch (ragError) {
-      console.log('⚠️ Error consultando RAG, continuando sin artículos');
+    } catch (ragError: any) {
+      console.log('❌ Error consultando RAG:', ragError.message);
+      console.log('   URL:', `${RAG_URL}/search`);
+      if (ragError.response) {
+        console.log('   Status:', ragError.response.status);
+        console.log('   Data:', ragError.response.data);
+      }
     }
 
-    // ============================================================
-    // ANALIZAR SENTIMIENTO/INTENCIÓN (NLP)
-    // ============================================================
+    
     let sentimiento: Sentimiento = 'neutral';
     let intencion: Intencion = 'informacion';
 
@@ -394,12 +387,10 @@ app.post('/message', async (req: Request, res: Response) => {
       sentimiento = (nlpResponse.data.sentimiento as Sentimiento) || 'neutral';
       intencion = (nlpResponse.data.intencion as Intencion) || 'informacion';
     } catch (nlpError) {
-      console.log('⚠️ Error en NLP, usando valores por defecto');
+      console.log(' Error en NLP, usando valores por defecto');
     }
 
-    // ============================================================
-    // GENERAR RESPUESTA INTELIGENTE COMPLETA
-    // ============================================================
+    
     const resultado = await smartResponseService.generarRespuestaCompleta(
       sessionId,
       usuarioId,
@@ -408,10 +399,10 @@ app.post('/message', async (req: Request, res: Response) => {
       articulosLegales
     );
 
-    // Si tenemos contexto del interrogador, agregarlo DESPUÉS para no interrumpir el saludo de Ollama
+    
     let respuestaFinal = resultado.respuesta;
     if (interrogationResult.resumenContexto && interrogationResult.contextoCompleto) {
-      // Mostrar contexto recopilado al final, no al inicio (para que Ollama hable primero)
+      
       const contextoFormateado = `\n\n---\n\n✅ **Contexto recopilado:**\n${interrogationResult.resumenContexto}`;
       respuestaFinal = respuestaFinal + contextoFormateado;
     }
@@ -426,7 +417,7 @@ app.post('/message', async (req: Request, res: Response) => {
       console.log(`   Contexto del interrogador: ${Object.keys(interrogationResult.contextoCompleto.respuestasObtenidas).length} respuestas`);
     }
 
-    // Guardar respuesta del asistente
+    
     await conversationService.saveMessage(
       sessionId,
       usuarioId,
@@ -448,9 +439,7 @@ app.post('/message', async (req: Request, res: Response) => {
       }
     );
 
-    // ============================================================
-    // REGISTRAR EN OLAP CUBE para Analytics y ML
-    // ============================================================
+    
     await olapService.registrarConsulta({
       textoConsulta: mensaje,
       usuarioId: usuarioId,
@@ -459,7 +448,7 @@ app.post('/message', async (req: Request, res: Response) => {
       sentimiento: sentimiento,
       articulosEncontrados: articulosLegales.length,
       profesionistasRecomendados: resultado.profesionistas?.length || 0,
-      ubicacion: {} // Se puede obtener del perfil del usuario en futuras versiones
+      ubicacion: {} 
     });
 
     return res.json({
@@ -471,7 +460,7 @@ app.post('/message', async (req: Request, res: Response) => {
       sentimiento,
       sessionId,
       source: 'smart_response',
-      // Datos adicionales para la UI
+      
       profesionistas: resultado.profesionistas,
       anunciantes: resultado.anunciantes,
       ofrecerMatch: resultado.ofrecerMatch,
@@ -485,7 +474,7 @@ app.post('/message', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener historial de conversación
+
 app.get('/session/:sessionId/history', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -504,7 +493,7 @@ app.get('/session/:sessionId/history', async (req: Request, res: Response) => {
   }
 });
 
-// Recomendar abogados
+
 app.post('/recommend-lawyers', async (req: Request, res: Response) => {
   try {
     const { usuarioId, cluster, ciudad, limit } = req.body;
@@ -513,17 +502,22 @@ app.post('/recommend-lawyers', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'cluster es requerido' });
     }
 
+    
+    const profesionistasBloqueados = await olapService.obtenerProfesionistasBloquados(usuarioId);
+
     const abogados = await lawyerService.recommendLawyers(
       cluster,
       usuarioId,
       ciudad,
-      limit || 10
+      limit || 10,
+      profesionistasBloqueados
     );
 
     res.json({
       success: true,
       cluster,
       totalAbogados: abogados.length,
+      bloqueados: profesionistasBloqueados.length,
       abogados
     });
   } catch (error: any) {
@@ -532,7 +526,7 @@ app.post('/recommend-lawyers', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener Top 10 profesionistas con formato
+
 app.get('/top-profesionistas', async (req: Request, res: Response) => {
   try {
     const especialidades = (req.query.especialidades as string)?.split(',') || [];
@@ -554,7 +548,7 @@ app.get('/top-profesionistas', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener anunciantes/servicios
+
 app.get('/anunciantes', async (req: Request, res: Response) => {
   try {
     const categorias = (req.query.categorias as string)?.split(',') || ['Grua', 'Taller'];
@@ -573,7 +567,7 @@ app.get('/anunciantes', async (req: Request, res: Response) => {
   }
 });
 
-// Buscar usuarios similares
+
 app.post('/find-similar-users', async (req: Request, res: Response) => {
   try {
     const { usuarioId, cluster, limit } = req.body;
@@ -599,7 +593,7 @@ app.post('/find-similar-users', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener grupos del usuario
+
 app.get('/user/:usuarioId/groups', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -616,7 +610,7 @@ app.get('/user/:usuarioId/groups', async (req: Request, res: Response) => {
   }
 });
 
-// Sugerir grupos
+
 app.get('/user/:usuarioId/suggest-groups', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -633,7 +627,7 @@ app.get('/user/:usuarioId/suggest-groups', async (req: Request, res: Response) =
   }
 });
 
-// Registrar feedback
+
 app.post('/feedback', async (req: Request, res: Response) => {
   try {
     const { usuarioId, tipo, data } = req.body;
@@ -654,7 +648,7 @@ app.post('/feedback', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener métricas de aprendizaje
+
 app.get('/metrics', async (req: Request, res: Response) => {
   try {
     const cluster = req.query.cluster as string;
@@ -671,7 +665,7 @@ app.get('/metrics', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener top abogados por cluster
+
 app.get('/top-lawyers/:cluster', async (req: Request, res: Response) => {
   try {
     const { cluster } = req.params;
@@ -689,7 +683,7 @@ app.get('/top-lawyers/:cluster', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener sesiones del usuario
+
 app.get('/user/:usuarioId/sessions', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -707,7 +701,7 @@ app.get('/user/:usuarioId/sessions', async (req: Request, res: Response) => {
   }
 });
 
-// Cerrar sesión
+
 app.post('/session/:sessionId/close', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -725,7 +719,7 @@ app.post('/session/:sessionId/close', async (req: Request, res: Response) => {
   }
 });
 
-// Eliminar sesión (borrar todo el historial)
+
 app.delete('/session/:sessionId', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
@@ -734,14 +728,14 @@ app.delete('/session/:sessionId', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'sessionId es requerido' });
     }
 
-    // Eliminar todos los mensajes de la sesión
+    
     const deleteMessagesQuery = `
       DELETE FROM conversaciones
       WHERE sesion_id = $1
     `;
     await pool.query(deleteMessagesQuery, [sessionId]);
 
-    // Eliminar la sesión
+    
     const deleteSessionQuery = `
       DELETE FROM sesiones_chat
       WHERE id = $1
@@ -762,7 +756,7 @@ app.delete('/session/:sessionId', async (req: Request, res: Response) => {
   }
 });
 
-// Contactar abogado (tracking)
+
 app.post('/contact-lawyer', async (req: Request, res: Response) => {
   try {
     const { abogadoId, cluster } = req.body;
@@ -782,11 +776,251 @@ app.post('/contact-lawyer', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// HISTORIAL DE CONVERSACIONES
-// ============================================================
 
-// Obtener todas las conversaciones (sesiones) del usuario
+app.post('/profesionista/aceptar', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, cluster, tipoAccion } = req.body;
+
+    if (!usuarioId || !profesionistaId || !cluster) {
+      return res.status(400).json({ 
+        error: 'usuarioId, profesionistaId y cluster son requeridos' 
+      });
+    }
+
+    
+    await olapService.registrarAceptacionProfesionista({
+      usuarioId,
+      profesionistaId,
+      cluster,
+      tipoAccion: tipoAccion || 'contacto'
+    });
+
+    
+    await lawyerService.trackContact(profesionistaId, cluster);
+
+    console.log(`✅ Profesionista ${profesionistaId.substring(0, 8)} aceptado por usuario ${usuarioId.substring(0, 8)}`);
+
+    res.json({
+      success: true,
+      message: 'Aceptación registrada correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error registrando aceptación:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.post('/profesionista/rechazar', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, cluster, razon } = req.body;
+
+    if (!usuarioId || !profesionistaId || !cluster) {
+      return res.status(400).json({ 
+        error: 'usuarioId, profesionistaId y cluster son requeridos' 
+      });
+    }
+
+    
+    await olapService.registrarRechazoProfesionista({
+      usuarioId,
+      profesionistaId,
+      cluster,
+      razon
+    });
+
+    // Verificar si ya tiene 3+ rechazos
+    const totalRechazos = await olapService.obtenerRechazosUsuario(usuarioId, profesionistaId);
+
+    console.log(`❌ Profesionista ${profesionistaId.substring(0, 8)} rechazado por usuario ${usuarioId.substring(0, 8)} (Total: ${totalRechazos})`);
+
+    res.json({
+      success: true,
+      message: 'Rechazo registrado correctamente',
+      totalRechazos,
+      bloqueado: totalRechazos >= 3
+    });
+  } catch (error: any) {
+    console.error('Error registrando rechazo:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.get('/usuario/:usuarioId/profesionistas-bloqueados', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId } = req.params;
+    const bloqueados = await olapService.obtenerProfesionistasBloquados(usuarioId);
+
+    res.json({
+      success: true,
+      bloqueados,
+      total: bloqueados.length
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.post('/profesionista/calificar', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, rating, comentario } = req.body;
+
+    if (!usuarioId || !profesionistaId || !rating) {
+      return res.status(400).json({ 
+        error: 'usuarioId, profesionistaId y rating son requeridos' 
+      });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({ error: 'Rating debe ser entre 1 y 5 estrellas' });
+    }
+
+    await olapService.calificarProfesionista({
+      usuarioId,
+      profesionistaId,
+      rating,
+      comentario
+    });
+
+    console.log(`⭐ Usuario ${usuarioId.substring(0, 8)} calificó con ${rating}/5 a profesionista ${profesionistaId.substring(0, 8)}`);
+
+    res.json({
+      success: true,
+      message: 'Calificación registrada correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error calificando profesionista:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.get('/profesionista/:profesionistaId/rating', async (req: Request, res: Response) => {
+  try {
+    const { profesionistaId } = req.params;
+    const rating = await olapService.obtenerRatingProfesionista(profesionistaId);
+
+    res.json({
+      success: true,
+      ...rating
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// Registrar preferencia de "no me interesa" (X) - usa el mismo endpoint que rechazar
+app.post('/profesionista/preferencia', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, cluster } = req.body;
+
+    if (!usuarioId || !profesionistaId) {
+      return res.status(400).json({ 
+        error: 'usuarioId y profesionistaId son requeridos' 
+      });
+    }
+
+    // Registrar como rechazo en OLAP (3 rechazos = bloqueado)
+    await olapService.registrarRechazoProfesionista({
+      usuarioId,
+      profesionistaId,
+      cluster: cluster || 'general'
+    });
+
+    console.log(`❌ Usuario ${usuarioId.substring(0, 8)} marcó "no interesa" a profesionista ${profesionistaId.substring(0, 8)}`);
+
+    res.json({
+      success: true,
+      message: 'Preferencia registrada correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error registrando preferencia:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// Reportar profesionista
+app.post('/profesionista/reportar', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, motivo, descripcion } = req.body;
+
+    if (!usuarioId || !profesionistaId || !motivo) {
+      return res.status(400).json({ 
+        error: 'usuarioId, profesionistaId y motivo son requeridos' 
+      });
+    }
+
+    // Insertar reporte en base de datos
+    await pool.query(
+      `INSERT INTO reportes_profesionistas 
+       (usuario_id, profesionista_id, motivo, descripcion, fecha_reporte, estado) 
+       VALUES ($1, $2, $3, $4, NOW(), 'pendiente')`,
+      [usuarioId, profesionistaId, motivo, descripcion || null]
+    );
+
+    console.log(`🚨 REPORTE: Usuario ${usuarioId.substring(0, 8)} reportó a profesionista ${profesionistaId.substring(0, 8)} por: ${motivo}`);
+
+    res.json({
+      success: true,
+      message: 'Reporte enviado al administrador correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error reportando profesionista:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+// Bloquear profesionista (envía últimos 10 mensajes al admin)
+app.post('/profesionista/bloquear', async (req: Request, res: Response) => {
+  try {
+    const { usuarioId, profesionistaId, motivo } = req.body;
+
+    if (!usuarioId || !profesionistaId) {
+      return res.status(400).json({ 
+        error: 'usuarioId y profesionistaId son requeridos' 
+      });
+    }
+
+    // Obtener últimos 10 mensajes de la conversación
+    const mensajesQuery = await pool.query(
+      `SELECT contenido, remitente_id, fecha_envio 
+       FROM mensajes_privados 
+       WHERE (remitente_id = $1 AND destinatario_id = $2) 
+          OR (remitente_id = $2 AND destinatario_id = $1)
+       ORDER BY fecha_envio DESC 
+       LIMIT 10`,
+      [usuarioId, profesionistaId]
+    );
+
+    // Insertar bloqueo en base de datos
+    await pool.query(
+      `INSERT INTO bloqueos_profesionistas 
+       (usuario_id, profesionista_id, motivo, ultimos_mensajes, fecha_bloqueo) 
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (usuario_id, profesionista_id) 
+       DO UPDATE SET fecha_bloqueo = NOW(), motivo = $3, ultimos_mensajes = $4`,
+      [usuarioId, profesionistaId, motivo || 'Sin motivo especificado', JSON.stringify(mensajesQuery.rows)]
+    );
+
+    console.log(`🚫 BLOQUEO: Usuario ${usuarioId.substring(0, 8)} bloqueó a profesionista ${profesionistaId.substring(0, 8)}`);
+    console.log(`📧 Enviando notificación al administrador con ${mensajesQuery.rows.length} mensajes`);
+
+    res.json({
+      success: true,
+      message: 'Profesionista bloqueado correctamente. El administrador ha sido notificado.'
+    });
+  } catch (error: any) {
+    console.error('Error bloqueando profesionista:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 app.get('/user/:usuarioId/conversations', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -835,12 +1069,12 @@ app.get('/user/:usuarioId/conversations', async (req: Request, res: Response) =>
   }
 });
 
-// Obtener mensajes de una conversación específica (historial completo)
+
 app.get('/conversation/:sessionId', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
 
-    // Obtener info de la sesión
+    
     const sessionQuery = `
       SELECT 
         sc.*,
@@ -857,7 +1091,7 @@ app.get('/conversation/:sessionId', async (req: Request, res: Response) => {
 
     const session = sessionResult.rows[0];
 
-    // Obtener todos los mensajes de la conversación
+    
     const messagesQuery = `
       SELECT 
         id,
@@ -901,11 +1135,7 @@ app.get('/conversation/:sessionId', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// FORO DE COMUNIDAD
-// ============================================================
 
-// Obtener categorías del foro
 app.get('/foro/categorias', async (req: Request, res: Response) => {
   try {
     const categorias = await foroService.getCategorias();
@@ -918,7 +1148,7 @@ app.get('/foro/categorias', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener publicaciones del foro
+
 app.get('/foro/publicaciones', async (req: Request, res: Response) => {
   try {
     const categoriaId = req.query.categoriaId as string;
@@ -943,7 +1173,7 @@ app.get('/foro/publicaciones', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener una publicación con sus comentarios
+
 app.get('/foro/publicacion/:publicacionId', async (req: Request, res: Response) => {
   try {
     const { publicacionId } = req.params;
@@ -964,7 +1194,7 @@ app.get('/foro/publicacion/:publicacionId', async (req: Request, res: Response) 
   }
 });
 
-// Crear nueva publicación
+
 app.post('/foro/publicacion', async (req: Request, res: Response) => {
   try {
     const { usuarioId, titulo, contenido, categoriaId } = req.body;
@@ -991,11 +1221,11 @@ app.post('/foro/publicacion', async (req: Request, res: Response) => {
   }
 });
 
-// Crear comentario en una publicación
+
 app.post('/foro/publicacion/:publicacionId/comentario', async (req: Request, res: Response) => {
   try {
     const { publicacionId } = req.params;
-    const { usuarioId, contenido } = req.body;
+    const { usuarioId, contenido, parentId } = req.body;
 
     if (!usuarioId || !contenido) {
       return res.status(400).json({ error: 'usuarioId y contenido son requeridos' });
@@ -1004,7 +1234,8 @@ app.post('/foro/publicacion/:publicacionId/comentario', async (req: Request, res
     const comentario = await foroService.crearComentario(
       publicacionId,
       usuarioId,
-      contenido
+      contenido,
+      parentId
     );
 
     res.json({
@@ -1016,7 +1247,7 @@ app.post('/foro/publicacion/:publicacionId/comentario', async (req: Request, res
   }
 });
 
-// Dar/quitar like a una publicación
+
 app.post('/foro/publicacion/:publicacionId/like', async (req: Request, res: Response) => {
   try {
     const { publicacionId } = req.params;
@@ -1037,7 +1268,7 @@ app.post('/foro/publicacion/:publicacionId/like', async (req: Request, res: Resp
   }
 });
 
-// Buscar publicaciones
+
 app.get('/foro/buscar', async (req: Request, res: Response) => {
   try {
     const query = req.query.q as string;
@@ -1061,7 +1292,7 @@ app.get('/foro/buscar', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener mis publicaciones
+
 app.get('/foro/mis-publicaciones/:usuarioId', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -1078,7 +1309,7 @@ app.get('/foro/mis-publicaciones/:usuarioId', async (req: Request, res: Response
   }
 });
 
-// Marcar/desmarcar publicación como "No útil"
+
 app.post('/foro/publicacion/:publicacionId/no-util', async (req: Request, res: Response) => {
   try {
     const { publicacionId } = req.params;
@@ -1099,7 +1330,7 @@ app.post('/foro/publicacion/:publicacionId/no-util', async (req: Request, res: R
   }
 });
 
-// Dar/quitar like a un comentario
+
 app.post('/foro/comentario/:comentarioId/like', async (req: Request, res: Response) => {
   try {
     const { comentarioId } = req.params;
@@ -1120,7 +1351,7 @@ app.post('/foro/comentario/:comentarioId/like', async (req: Request, res: Respon
   }
 });
 
-// Obtener miembros de una categoría
+
 app.get('/foro/categoria/:categoriaId/miembros', async (req: Request, res: Response) => {
   try {
     const { categoriaId } = req.params;
@@ -1137,11 +1368,6 @@ app.get('/foro/categoria/:categoriaId/miembros', async (req: Request, res: Respo
   }
 });
 
-// ============================================================
-// MENSAJES PRIVADOS (1:1)
-// ============================================================
-
-// Obtener todas las conversaciones privadas del usuario
 app.get('/mensajes/conversaciones/:usuarioId', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -1158,7 +1384,7 @@ app.get('/mensajes/conversaciones/:usuarioId', async (req: Request, res: Respons
   }
 });
 
-// Obtener mensajes de una conversación específica
+
 app.get('/mensajes/:ciudadanoId/:abogadoId', async (req: Request, res: Response) => {
   try {
     const { ciudadanoId, abogadoId } = req.params;
@@ -1176,7 +1402,7 @@ app.get('/mensajes/:ciudadanoId/:abogadoId', async (req: Request, res: Response)
   }
 });
 
-// Enviar un mensaje privado
+
 app.post('/mensajes/enviar', async (req: Request, res: Response) => {
   try {
     const { ciudadanoId, abogadoId, remitenteId, contenido } = req.body;
@@ -1203,7 +1429,7 @@ app.post('/mensajes/enviar', async (req: Request, res: Response) => {
   }
 });
 
-// Marcar mensajes como leídos
+
 app.post('/mensajes/marcar-leidos', async (req: Request, res: Response) => {
   try {
     const { ciudadanoId, abogadoId, lectorId } = req.body;
@@ -1229,7 +1455,6 @@ app.post('/mensajes/marcar-leidos', async (req: Request, res: Response) => {
   }
 });
 
-// Obtener cantidad de mensajes no leídos
 app.get('/mensajes/no-leidos/:usuarioId', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -1241,6 +1466,30 @@ app.get('/mensajes/no-leidos/:usuarioId', async (req: Request, res: Response) =>
       noLeidos
     });
   } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Vaciar chat (eliminar todos los mensajes entre dos usuarios)
+app.delete('/mensajes/:ciudadanoId/:abogadoId', async (req: Request, res: Response) => {
+  try {
+    const { ciudadanoId, abogadoId } = req.params;
+
+    await pool.query(
+      `DELETE FROM mensajes_privados 
+       WHERE (remitente_id = $1 AND destinatario_id = $2) 
+          OR (remitente_id = $2 AND destinatario_id = $1)`,
+      [ciudadanoId, abogadoId]
+    );
+
+    console.log(`🗑️ Chat vaciado entre ${ciudadanoId.substring(0, 8)} y ${abogadoId.substring(0, 8)}`);
+
+    res.json({
+      success: true,
+      message: 'Chat eliminado correctamente'
+    });
+  } catch (error: any) {
+    console.error('Error vaciando chat:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1271,14 +1520,7 @@ app.post('/mensajes/conversacion', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================
-// GESTIÓN DE GRUPOS (CLUSTERING AUTOMÁTICO)
-// ============================================================
 
-/**
- * GET /user/:usuarioId/mis-grupos
- * Obtiene todos los grupos a los que pertenece el usuario
- */
 app.get('/user/:usuarioId/mis-grupos', async (req: Request, res: Response) => {
   try {
     const { usuarioId } = req.params;
@@ -1318,10 +1560,7 @@ app.get('/user/:usuarioId/mis-grupos', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /grupos/:grupoId/estadisticas
- * Obtiene estadísticas del grupo incluyendo miembros y actividad
- */
+
 app.get('/grupos/:grupoId/estadisticas', async (req: Request, res: Response) => {
   try {
     const { grupoId } = req.params;
@@ -1377,22 +1616,19 @@ app.get('/grupos/:grupoId/estadisticas', async (req: Request, res: Response) => 
   }
 });
 
-// ============================================================
-// INICIAR SERVIDOR
-// ============================================================
 
 app.listen(PORT, () => {
-  console.log(`🤖 Chat Service corriendo en puerto ${PORT}`);
-  console.log(`📊 Integrado con RAG: ${RAG_URL}`);
-  console.log(`🧠 Integrado con NLP: ${NLP_URL}`);
-  console.log(`🎯 Integrado con Clustering: ${CLUSTERING_URL}`);
-  console.log(`💬 Foro de comunidad habilitado`);
-  console.log(`📨 Chat privado 1:1 habilitado`);
-  console.log(`👥 Agrupamiento automático por clusters habilitado`);
+  console.log(` Chat Service corriendo en puerto ${PORT}`);
+  console.log(` Integrado con RAG: ${RAG_URL}`);
+  console.log(` Integrado con NLP: ${NLP_URL}`);
+  console.log(` Integrado con Clustering: ${CLUSTERING_URL}`);
+  console.log(` Foro de comunidad habilitado`);
+  console.log(` Chat privado 1:1 habilitado`);
+  console.log(` Agrupamiento automático por clusters habilitado`);
 });
 
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Cerrando Chat Service...');
+  console.log('\n X Cerrando Chat Service...');
   await pool.end();
   process.exit(0);
 });

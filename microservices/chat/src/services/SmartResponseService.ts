@@ -50,6 +50,8 @@ export interface ConversationState {
   // Rastrear por tema para no repetir en el mismo tema
   temasConProfesionistasOfrecidos: string[];
   temasConAnunciantesOfrecidos: string[];
+  // Nombre del usuario para consistencia en las respuestas
+  nombreUsuario: string;
 }
 
 // Configuración por tema
@@ -663,30 +665,92 @@ const TEMA_CONFIG: { [key: string]: {
 export class SmartResponseService {
   private pool: Pool;
   private ragUrl: string;
+  private clusteringUrl: string;
   private conversationStates: Map<string, ConversationState> = new Map();
   private foroService: ForoInteligenteService;
   private learningService: AdaptiveLearningService;
   private conversationService: ConversationService;
 
-  constructor(pool: Pool, ragUrl: string = 'http://rag:3009', conversationService: ConversationService) {
+  constructor(pool: Pool, ragUrl: string = 'http://rag:3009', conversationService: ConversationService, clusteringUrl: string = 'http://clustering:3002') {
     this.pool = pool;
     this.ragUrl = ragUrl;
+    this.clusteringUrl = clusteringUrl;
     this.foroService = new ForoInteligenteService(pool);
     this.learningService = new AdaptiveLearningService(pool);
     this.conversationService = conversationService;
   }
 
   /**
-   * Detectar el tema de la consulta CON CONFIANZA
-   * Retorna: { tema: string, confianza: number, esOffTopic: boolean, necesitaClarificacion: boolean }
+   * Llamar al servicio de clustering ML para clasificar el tema
    */
-  detectarTemaConConfianza(mensaje: string): {
+  private async llamarServicioClustering(mensaje: string): Promise<{
+    cluster: string;
+    confianza: number;
+    alternativas: Array<{ cluster: string; confianza: number }>;
+  } | null> {
+    try {
+      const response = await fetch(`${this.clusteringUrl}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ textoConsulta: mensaje }),
+        signal: AbortSignal.timeout(5000) // Timeout de 5 segundos
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ Clustering service respondió con status ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json();
+      console.log(`🎯 Clustering ML: cluster=${data.cluster}, confianza=${data.confianza}`);
+      return data;
+    } catch (error: any) {
+      console.warn(`⚠️ Error llamando a clustering service: ${error.message}`);
+      return null;
+    }
+  }
+
+  private mapearClusterATema(cluster: string): string {
+    const mapeo: { [key: string]: string } = {
+      'C1': 'exceso_velocidad',      
+      'C2': 'estacionamiento',       
+      'C3': 'alcoholemia',           
+      'C4': 'documentos',            
+      'C5': 'accidente',             
+      'C6': 'vuelta_prohibida',      
+      'off_topic': 'off_topic'
+    };
+    return mapeo[cluster] || 'general';
+  }
+
+  
+  async detectarTemaConConfianza(mensaje: string): Promise<{
     tema: string;
     confianza: number;
     esOffTopic: boolean;
     necesitaClarificacion: boolean;
     razonOffTopic?: string;
-  } {
+  }> {
+    
+    const clusteringResult = await this.llamarServicioClustering(mensaje);
+    if (clusteringResult) {
+      const temaInterno = this.mapearClusterATema(clusteringResult.cluster);
+      const esOffTopic = clusteringResult.cluster === 'off_topic';
+      
+      console.log(`🤖 Usando Clustering ML: ${clusteringResult.cluster} → tema=${temaInterno}, confianza=${clusteringResult.confianza}`);
+      
+      return {
+        tema: temaInterno,
+        confianza: clusteringResult.confianza,
+        esOffTopic: esOffTopic,
+        necesitaClarificacion: clusteringResult.confianza < 0.6,
+        razonOffTopic: esOffTopic ? 'No relacionado con tránsito o leyes vehiculares' : undefined
+      };
+    }
+    
+    // === FALLBACK: Usar detección local si clustering falla ===
+    console.log(`⚠️ Clustering ML no disponible, usando detección local de patrones`);
+    
     const msgLower = mensaje.toLowerCase();
     let confianza = 0;
     let matchCount = 0;
@@ -903,7 +967,9 @@ export class SmartResponseService {
         peso: 0.16 
       },
       'vuelta_prohibida': { 
-        patterns: ['vuelta prohibida', 'vuelta en u', 'di vuelta', 'dí vuelta', 'giro prohibido', 'no se puede dar vuelta', 'retorno prohibido', 'di la vuelta', 'dí la vuelta', 'vuelta donde no'], 
+        patterns: ['vuelta prohibida', 'vuelta en u', 'di vuelta', 'dí vuelta', 'giro prohibido', 'no se puede dar vuelta', 
+                  'retorno prohibido', 'di la vuelta', 'dí la vuelta', 'vuelta donde no', 'dando vuelta', 'dar vuelta',
+                  'me agarro dando vuelta', 'me agarraron dando vuelta', 'vuelta en "u"', 'retorno', 'dando la vuelta'], 
         peso: 0.18 
       },
       'sentido_contrario': { 
@@ -1056,6 +1122,18 @@ export class SmartResponseService {
       {
         patterns: ['politica', 'política', 'presidente', 'elecciones', 'votar', 'partido politico'],
         razon: 'consulta política'
+      },
+      {
+        patterns: ['divorcio', 'divorciarme', 'separacion', 'separación', 'matrimonio', 'esposo', 'esposa', 'conyuge', 'pensión alimenticia', 'custodia', 'hijos', 'familia'],
+        razon: 'consulta de derecho familiar'
+      },
+      {
+        patterns: ['laboral', 'trabajo', 'despido', 'renuncia', 'salario', 'sueldo', 'jefe', 'empresa', 'empleado'],
+        razon: 'consulta laboral'
+      },
+      {
+        patterns: ['renta', 'arrendamiento', 'inquilino', 'propietario', 'casa', 'departamento', 'vivienda', 'inmueble'],
+        razon: 'consulta de arrendamiento'
       }
     ];
     
@@ -1125,8 +1203,8 @@ export class SmartResponseService {
   /**
    * Detectar el tema de la consulta (método legacy para compatibilidad)
    */
-  detectarTema(mensaje: string): string {
-    const resultado = this.detectarTemaConConfianza(mensaje);
+  async detectarTema(mensaje: string): Promise<string> {
+    const resultado = await this.detectarTemaConConfianza(mensaje);
     return resultado.tema;
   }
 
@@ -1134,8 +1212,8 @@ export class SmartResponseService {
    * Detectar tema de forma preliminar para la máquina de estados
    * Alias público de detectarTema para uso en index.ts
    */
-  detectarTemaPreliminar(mensaje: string): string {
-    return this.detectarTema(mensaje);
+  async detectarTemaPreliminar(mensaje: string): Promise<string> {
+    return await this.detectarTema(mensaje);
   }
 
   /**
@@ -1151,7 +1229,8 @@ export class SmartResponseService {
         yaOfreceForo: false,
         yaOfreceAnunciantes: false,
         temasConProfesionistasOfrecidos: [],
-        temasConAnunciantesOfrecidos: []
+        temasConAnunciantesOfrecidos: [],
+        nombreUsuario: ''  // Se establecerá en el primer mensaje
       });
     }
     return this.conversationStates.get(sessionId)!;;
@@ -1755,6 +1834,15 @@ export class SmartResponseService {
     const state = this.getConversationState(sessionId);
     state.turno++;
     
+    // === PERSISTIR NOMBRE: Guardar nombre del usuario en el estado ===
+    // Solo actualizar si se provee un nombre válido y no está ya guardado
+    if (nombreUsuario && nombreUsuario !== 'Usuario' && !state.nombreUsuario) {
+      state.nombreUsuario = nombreUsuario;
+      console.log(`👤 Nombre guardado en estado: ${nombreUsuario}`);
+    }
+    // Usar el nombre guardado si existe, sino usar el parámetro actual
+    const nombreFinal = state.nombreUsuario || nombreUsuario || 'Usuario';
+    
     // === APRENDIZAJE: Detectar feedback del usuario ===
     const feedback = this.learningService.detectarFeedback(mensaje);
     if (feedback) {
@@ -1762,7 +1850,7 @@ export class SmartResponseService {
       
       // Si es una corrección, aprender de ella
       if (feedback.tipo === 'correccion' && feedback.correccionSugerida) {
-        const nuevoTema = this.detectarTema(feedback.correccionSugerida);
+        const nuevoTema = await this.detectarTema(feedback.correccionSugerida);
         await this.learningService.aprenderDeError(
           mensaje,
           state.temaActual,
@@ -1774,43 +1862,72 @@ export class SmartResponseService {
     }
 
     // === DETECCIÓN CON CONFIANZA ===
-    const deteccion = this.detectarTemaConConfianza(mensaje);
+    const deteccion = await this.detectarTemaConConfianza(mensaje);
     console.log(`🎯 Detección: tema=${deteccion.tema}, confianza=${(deteccion.confianza * 100).toFixed(1)}%, offTopic=${deteccion.esOffTopic}`);
     
+    // === VERIFICAR SEGUIMIENTO ANTES DE OFF-TOPIC ===
+    // Evaluar si es pregunta de seguimiento ANTES de rechazar como off-topic
+    const msgLower = mensaje.toLowerCase();
+    const esSeguimiento = msgLower.length < 100 && (
+      msgLower.includes('se fue') || msgLower.includes('huyo') || msgLower.includes('huyó') ||
+      msgLower.includes('que hago') || msgLower.includes('qué hago') ||
+      msgLower.includes('y ahora') || msgLower.includes('entonces') ||
+      msgLower.includes('el wey') || msgLower.includes('el man') || msgLower.includes('el tipo') ||
+      msgLower.includes('mi seguro') || msgLower.includes('el seguro') || msgLower.includes('cubre') ||
+      msgLower.includes('la multa') || msgLower.includes('el oficial') ||
+      msgLower.includes('cuanto') || msgLower.includes('cuánto') || msgLower.includes('cuesta') ||
+      msgLower.includes('donde') || msgLower.includes('dónde') ||
+      msgLower.includes('como') || msgLower.includes('cómo') ||
+      msgLower.startsWith('y ') || msgLower.startsWith('pero ') ||
+      msgLower.includes('estos daños') || msgLower.includes('este caso') ||
+      msgLower.includes('necesito') || msgLower.includes('ocupo') || msgLower.includes('requiero') ||
+      // Preguntas de defensa/seguimiento
+      msgLower.includes('puedo defender') || msgLower.includes('me defiendo') ||
+      msgLower.includes('me puedo defender') || msgLower.includes('como me defiendo') ||
+      msgLower.includes('cómo me defiendo') || msgLower.includes('que pasos') ||
+      msgLower.includes('qué pasos') || msgLower.includes('que sigue') ||
+      msgLower.includes('qué sigue') || msgLower.includes('ahora que') ||
+      msgLower.includes('ahora qué') || msgLower.includes('que hago ahora') ||
+      msgLower.includes('qué hago ahora') || msgLower.includes('como procedo') ||
+      msgLower.includes('cómo procedo') || msgLower.includes('que me recomiend') ||
+      msgLower.includes('qué me recomiend') || msgLower.includes('como puedo') ||
+      msgLower.includes('cómo puedo') || msgLower.includes('pasos a seguir') ||
+      msgLower.includes('que debo hacer') || msgLower.includes('qué debo hacer')
+    );
+    
+    // Si es seguimiento y hay tema activo, ANULAR la detección de off-topic
+    if (esSeguimiento && state.temaActual && state.temaActual !== 'general') {
+      console.log(`🔄 SEGUIMIENTO detectado con tema activo: "${state.temaActual}" - Anulando off-topic`);
+      // Forzar el tema actual y continuar el flujo normal
+      deteccion.tema = state.temaActual;
+      deteccion.esOffTopic = false;
+      deteccion.confianza = 0.9; // Alta confianza porque sabemos el contexto
+    }
+    
     // === CASO 1: OFF-TOPIC ===
-    // NUEVO: Ignorar off-topic si RAG encontró artículos relevantes (fallback inteligente)
+    // Si clustering detecta off-topic Y NO es seguimiento, respetar esa clasificación
     if (deteccion.esOffTopic) {
-      console.log(`🔍 DEBUG OFF-TOPIC: artículos disponibles = ${articulosLegales.length}`);
-
-      // Si RAG encontró artículos relevantes, ignorar la clasificación off-topic
-      // y continuar con generación normal usando Ollama
-      if (articulosLegales.length >= 3) {
-        console.log('🧠 FALLBACK INTELIGENTE: Clustering marcó off_topic pero RAG encontró artículos');
-        console.log(`→ Ignorando clasificación off_topic, procesando como consulta válida`);
-        // No retornar aquí - continuar con el flujo normal para generar respuesta con Ollama
-        deteccion.tema = 'consulta_general';  // Override tema
-        deteccion.esOffTopic = false;
-      } else {
-        console.log(`❌ Solo ${articulosLegales.length} artículos encontrados, verdaderamente off-topic`);
-        // Verdaderamente off-topic (sin artículos relevantes)
-        const respuestaOffTopic = this.generarRespuestaOffTopic(deteccion.razonOffTopic || '', nombreUsuario);
-        return {
-          respuesta: respuestaOffTopic,
-          tema: 'off_topic',
-          sugerencias: TEMA_CONFIG['off_topic'].preguntasSugeridas,
-          ofrecerMatch: false,
-          ofrecerForo: false,
-          confianza: deteccion.confianza
-        };
-      }
+      console.log(`🔍 OFF-TOPIC detectado: confianza=${deteccion.confianza}%`);
+      console.log(`❌ Pregunta fuera del alcance del sistema legal`);
+      
+      // Generar respuesta educada explicando el alcance del sistema
+      const respuestaOffTopic = this.generarRespuestaOffTopic(deteccion.razonOffTopic || '', nombreFinal);
+      return {
+        respuesta: respuestaOffTopic,
+        tema: 'off_topic',
+        sugerencias: TEMA_CONFIG['off_topic'].preguntasSugeridas,
+        ofrecerMatch: false,
+        ofrecerForo: false,
+        confianza: deteccion.confianza
+      };
     }
     
     // === CASO 2: SOCIAL (saludos) ===
     if (deteccion.tema === 'social') {
       const saludos = [
-        `Hola ${nombreUsuario}. Soy **LexIA**, tu asistente legal de tránsito.\n\n¿En qué puedo ayudarte hoy?\n\nPuedes preguntarme sobre:\n• Multas e infracciones\n• Accidentes de tránsito\n• Tus derechos como conductor\n• Documentos vehiculares`,
-        `Bienvenido ${nombreUsuario}. Estoy aquí para ayudarte con cualquier duda de tránsito en Chiapas.\n\n¿Tienes alguna situación específica?`,
-        `Hola ${nombreUsuario}, ¿en qué tema de tránsito puedo orientarte?\n\nMultas | Accidentes | Documentos | Derechos`
+        `Hola ${nombreFinal}. Soy **LexIA**, tu asistente legal de tránsito.\n\n¿En qué puedo ayudarte hoy?\n\nPuedes preguntarme sobre:\n• Multas e infracciones\n• Accidentes de tránsito\n• Tus derechos como conductor\n• Documentos vehiculares`,
+        `Bienvenido ${nombreFinal}. Estoy aquí para ayudarte con cualquier duda de tránsito en Chiapas.\n\n¿Tienes alguna situación específica?`,
+        `Hola ${nombreFinal}, ¿en qué tema de tránsito puedo orientarte?\n\nMultas | Accidentes | Documentos | Derechos`
       ];
       return {
         respuesta: saludos[Math.floor(Math.random() * saludos.length)],
@@ -1829,7 +1946,7 @@ export class SmartResponseService {
     const esTemaUrgente = temasUrgentesNoClarificar.includes(deteccion.tema);
     
     if (deteccion.necesitaClarificacion && state.turno <= 2 && !esTemaUrgente) {
-      const preguntaClarificacion = this.generarPreguntaClarificacion(deteccion.tema, nombreUsuario);
+      const preguntaClarificacion = this.generarPreguntaClarificacion(deteccion.tema, nombreFinal);
       return {
         respuesta: preguntaClarificacion,
         tema: deteccion.tema,
@@ -1851,38 +1968,27 @@ export class SmartResponseService {
     tema = this.learningService.mejorarDeteccionIntencion(mensaje, tema);
     
     // === MEMORIA DE CONTEXTO ===
-    // Mantener contexto cuando:
-    // 1. Se detecta 'general' pero hay tema activo
-    // 2. Se detecta tema diferente con baja confianza y es pregunta de seguimiento
-    const msgLower = mensaje.toLowerCase();
-    const esSeguimiento = msgLower.length < 60 && (
-      msgLower.includes('se fue') || msgLower.includes('huyo') || msgLower.includes('huyó') ||
-      msgLower.includes('que hago') || msgLower.includes('qué hago') ||
-      msgLower.includes('y ahora') || msgLower.includes('entonces') ||
-      msgLower.includes('el wey') || msgLower.includes('el man') || msgLower.includes('el tipo') ||
-      msgLower.includes('mi seguro') || msgLower.includes('el seguro') || msgLower.includes('cubre') ||
-      msgLower.includes('la multa') || msgLower.includes('el oficial') ||
-      msgLower.includes('cuanto') || msgLower.includes('cuánto') || msgLower.includes('cuesta') ||
-      msgLower.includes('donde') || msgLower.includes('dónde') ||
-      msgLower.includes('como') || msgLower.includes('cómo') ||
-      msgLower.startsWith('y ') || msgLower.startsWith('pero ') ||
-      msgLower.includes('estos daños') || msgLower.includes('este caso') ||
-      msgLower.includes('necesito') || msgLower.includes('ocupo') || msgLower.includes('requiero')
-    );
+    // NOTA: La evaluación de esSeguimiento ya se hizo arriba para anular off-topic
+    // Aquí solo manejamos otros casos de mantener contexto
     
     // Servicios que son de seguimiento en contexto de accidente
     const esServicioAccidente = (msgLower.includes('grua') || msgLower.includes('grúa') || 
       msgLower.includes('taller') || msgLower.includes('aseguradora') || msgLower.includes('seguro')) &&
       state.temaActual === 'accidente';
     
-    // Casos donde mantener contexto:
+    // Casos adicionales donde mantener contexto (además del seguimiento ya evaluado):
     // 1. Tema es general pero hay tema activo y es seguimiento
-    // 2. Tema detectado con baja confianza (<0.65) pero hay tema activo relevante
+    // 2. Tema detectado con baja confianza (<=0.65) pero hay tema activo relevante
     // 3. Pide servicio relacionado a accidente (grúa, taller) estando en contexto de accidente
     const mantenerContexto = state.temaActual && state.temaActual !== 'general' && (
-      (esSeguimiento && (tema === 'general' || (deteccion.confianza < 0.65 && tema !== state.temaActual))) ||
+      (esSeguimiento && (tema === 'general' || (deteccion.confianza <= 0.65 && tema !== state.temaActual))) ||
       esServicioAccidente
     );
+    
+    // Debug: mostrar evaluación de seguimiento
+    if (esSeguimiento && state.temaActual) {
+      console.log(`🔍 DEBUG Seguimiento: esSeguimiento=true, temaActual="${state.temaActual}", temaDetectado="${tema}", confianza=${(deteccion.confianza*100).toFixed(0)}%`);
+    }
     
     if (mantenerContexto) {
       console.log(`🔄 Manteniendo contexto: "${tema}" (${(deteccion.confianza*100).toFixed(0)}%) → "${state.temaActual}" (seguimiento)`);
@@ -1909,11 +2015,14 @@ export class SmartResponseService {
   // 1. Construir contexto para el LLM
   const UMBRAL_SIMILITUD_RAG = 0.35; // antes 0.62, bajamos para no perder artículos
   const articulosRelevantes = articulosLegales.filter(art => (art.similitud || 0) >= UMBRAL_SIMILITUD_RAG);
-  console.log(`📚 RAG articulos totales=${articulosLegales.length}, relevantes>=${UMBRAL_SIMILITUD_RAG} => ${articulosRelevantes.length}`);
+  
+  // Limitar a los 5 más relevantes para Ollama (balance entre detalle y velocidad)
+  const articulosParaOllama = articulosRelevantes.slice(0, 5);
+  console.log(`📚 RAG articulos totales=${articulosLegales.length}, relevantes>=${UMBRAL_SIMILITUD_RAG} => ${articulosRelevantes.length}, enviando a Ollama: ${articulosParaOllama.length}`);
 	
   let contextoRAG = '';
-  if (articulosRelevantes.length > 0) {
-    contextoRAG = articulosRelevantes.map(art => 
+  if (articulosParaOllama.length > 0) {
+    contextoRAG = articulosParaOllama.map(art => 
       `[Fuente: ${art.fuente} - ${art.titulo}]\n${art.contenido}`
     ).join('\n\n---\n\n');
   } else {
@@ -1961,7 +2070,7 @@ const historialConversacion = historial.map((msg: any) =>
 	console.log(`📚 Tema/Cluster RAG detectado: ${tema}`);
 
 	const respuestaLLM = await ollamaResponseGenerator.generarRespuestaSintetizada(
-	  nombreUsuario,
+	  nombreFinal,
 	  mensaje,
 	  contextoRAG,
 	  historialConversacion,
@@ -2058,7 +2167,7 @@ const historialConversacion = historial.map((msg: any) =>
     }
     
     // === CIERRE ===
-    respuesta += `\n¿En qué más puedo ayudarte, ${nombreUsuario}?`;
+    respuesta += `\n¿En qué más puedo ayudarte, ${nombreFinal}?`;
     
     // Guardar estado actualizado
     this.updateConversationState(sessionId, state);
@@ -2985,9 +3094,9 @@ Las plataformas tienen departamentos legales. Si tu caso es grave, busca un abog
   generarSaludo(nombreUsuario: string): string {
     // Saludo más natural y conversacional
     const saludos = [
-      `¡Hola ${nombreUsuario}! 🚗`,
-      `¡Qué tal ${nombreUsuario}! 👋`,
-      `¡Bienvenido ${nombreUsuario}! 🙌`
+      `¡Hola ${nombreUsuario}! `,
+      `¡Qué tal ${nombreUsuario}! `,
+      `¡Bienvenido ${nombreUsuario}! `
     ];
     const saludo = saludos[Math.floor(Math.random() * saludos.length)];
     
@@ -2995,17 +3104,13 @@ Las plataformas tienen departamentos legales. Si tu caso es grave, busca un abog
 
 Soy **LexIA**, tu asistente para temas de tránsito en Chiapas. Puedo ayudarte con:
 
-🚦 **Multas e infracciones** - qué hacer, cómo pagar o impugnar
-🚗 **Accidentes** - pasos a seguir, documentación, seguro
-📋 **Documentos** - licencia, verificación, tarjeta de circulación
-⚖️ **Tus derechos** - qué puede y no puede hacer un oficial
+ **Multas e infracciones** - qué hacer, cómo pagar o impugnar
+ **Accidentes** - pasos a seguir, documentación, seguro
+ **Documentos** - licencia, verificación, tarjeta de circulación
+ **Tus derechos** - qué puede y no puede hacer un oficial
 
 Cuéntame, ¿qué situación tienes?`;
   }
-
-  /**
-   * Formatear lista de Top 10 profesionistas
-   */
   formatearTop10Profesionistas(profesionistas: Profesionista[]): string {
     let respuesta = `👨‍⚖️ **Top 10 Profesionistas - Chiapas**\n\n`;
     

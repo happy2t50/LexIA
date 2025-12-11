@@ -75,10 +75,44 @@ export function requireRole(...allowedRoles: string[]) {
 }
 
 /**
- * Middleware para verificar que el usuario sea admin
+ * Alias para authenticate (compatibilidad)
+ */
+export const requireAuth = authenticate;
+
+/**
+ * Middleware combinado para autenticar Y verificar que sea admin
  */
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-    return requireRole('admin')(req, res, next);
+    // Primero autenticar
+    authenticate(req, res, () => {
+        console.log('🔐 requireAdmin - req.user:', JSON.stringify(req.user, null, 2));
+        
+        // Si la autenticación fue exitosa y req.user está definido
+        if (!req.user) {
+            console.log('❌ requireAdmin - No hay req.user');
+            res.status(401).json({
+                error: 'No autenticado',
+                message: 'Debes estar autenticado para acceder a este recurso'
+            });
+            return;
+        }
+        
+        console.log('🔍 requireAdmin - Verificando rol:', req.user.rol, '=== "admin"?', req.user.rol === 'admin');
+        
+        // Verificar rol de admin
+        if (req.user.rol !== 'admin') {
+            console.log('❌ requireAdmin - Rol inválido:', req.user.rol);
+            res.status(403).json({
+                error: 'Acceso denegado',
+                message: 'Se requiere rol de administrador'
+            });
+            return;
+        }
+        
+        console.log('✅ requireAdmin - Acceso concedido');
+        // Usuario autenticado y es admin
+        next();
+    });
 }
 
 /**

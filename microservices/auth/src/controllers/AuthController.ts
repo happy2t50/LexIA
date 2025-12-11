@@ -271,7 +271,7 @@ export class AuthController {
 
     /**
      * POST /api/auth/forgot-password
-     * Solicitar recuperación de contraseña
+     * Solicitar recuperación de contraseña - envía código de 6 dígitos
      */
     async forgotPassword(req: Request, res: Response): Promise<void> {
         try {
@@ -281,31 +281,67 @@ export class AuthController {
             await AuthService.requestPasswordReset(email, ipAddress);
 
             res.json({
-                message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña'
+                message: 'Si el email existe, recibirás un código de verificación',
+                success: true
             });
         } catch (error: any) {
             res.status(400).json({
                 error: 'Error al solicitar recuperación',
-                message: error.message
+                message: error.message,
+                success: false
+            });
+        }
+    }
+
+    /**
+     * POST /api/auth/verify-reset-code
+     * Verificar código de recuperación
+     */
+    async verifyResetCode(req: Request, res: Response): Promise<void> {
+        try {
+            const { email, code } = req.body;
+
+            const isValid = await AuthService.verifyResetCode(email, code);
+
+            if (isValid) {
+                res.json({ 
+                    message: 'Código válido',
+                    success: true 
+                });
+            } else {
+                res.status(400).json({ 
+                    error: 'Código inválido o expirado',
+                    success: false 
+                });
+            }
+        } catch (error: any) {
+            res.status(400).json({
+                error: 'Error al verificar código',
+                message: error.message,
+                success: false
             });
         }
     }
 
     /**
      * POST /api/auth/reset-password
-     * Resetear contraseña
+     * Resetear contraseña con código verificado
      */
     async resetPassword(req: Request, res: Response): Promise<void> {
         try {
-            const { token, newPassword } = req.body;
+            const { email, code, newPassword } = req.body;
 
-            await AuthService.resetPassword(token, newPassword);
+            await AuthService.resetPassword(email, code, newPassword);
 
-            res.json({ message: 'Contraseña actualizada exitosamente' });
+            res.json({ 
+                message: 'Contraseña actualizada exitosamente',
+                success: true 
+            });
         } catch (error: any) {
             res.status(400).json({
                 error: 'Error al resetear contraseña',
-                message: error.message
+                message: error.message,
+                success: false
             });
         }
     }

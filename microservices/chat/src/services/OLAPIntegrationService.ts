@@ -43,9 +43,7 @@ export class OLAPIntegrationService {
     this.olapUrl = olapUrl;
   }
 
-  /**
-   * Registrar consulta en OLAP Cube para analytics y ML
-   */
+  
   async registrarConsulta(params: {
     textoConsulta: string;
     usuarioId: string;
@@ -97,17 +95,14 @@ export class OLAPIntegrationService {
         timeout: 5000
       });
 
-      console.log(`📊 OLAP: Consulta registrada [${params.cluster}] para usuario ${params.usuarioId.substring(0, 8)}`);
+      console.log(` OLAP: Consulta registrada [${params.cluster}] para usuario ${params.usuarioId.substring(0, 8)}`);
     } catch (error: any) {
-      // No crítico - el OLAP es para analytics, no afecta la respuesta al usuario
+      
       console.log(`⚠️  OLAP registro falló (no crítico):`, error.message);
     }
   }
 
-  /**
-   * Obtener historial de consultas del usuario
-   * Útil para personalizar respuestas
-   */
+  
   async obtenerHistorialUsuario(usuarioId: string): Promise<ConsultaOLAP[]> {
     try {
       const response = await axios.get(`${this.olapUrl}/consultas/usuario/${usuarioId}`, {
@@ -120,24 +115,21 @@ export class OLAPIntegrationService {
     }
   }
 
-  /**
-   * Obtener cluster predominante del usuario
-   * Ejemplo: Si usuario siempre pregunta sobre alcohol → cluster "alcoholimetro"
-   */
+  
   async obtenerClusterPredominante(usuarioId: string): Promise<string | null> {
     try {
       const historial = await this.obtenerHistorialUsuario(usuarioId);
 
       if (historial.length === 0) return null;
 
-      // Contar frecuencia de clusters
+      
       const clusterCounts: Record<string, number> = {};
       historial.forEach(consulta => {
         const cluster = consulta.clusterAsignado || 'general';
         clusterCounts[cluster] = (clusterCounts[cluster] || 0) + 1;
       });
 
-      // Obtener el más frecuente
+      
       let maxCluster = 'general';
       let maxCount = 0;
       Object.entries(clusterCounts).forEach(([cluster, count]) => {
@@ -147,15 +139,13 @@ export class OLAPIntegrationService {
         }
       });
 
-      return maxCount >= 2 ? maxCluster : null; // Al menos 2 consultas del mismo tipo
+      return maxCount >= 2 ? maxCluster : null; 
     } catch (error) {
       return null;
     }
   }
 
-  /**
-   * Obtener estadísticas del usuario para personalización
-   */
+  
   async obtenerPerfilUsuario(usuarioId: string): Promise<{
     totalConsultas: number;
     clusterPredominante: string | null;
@@ -210,9 +200,7 @@ export class OLAPIntegrationService {
     return mapa[intencion] || 'Otra categoría';
   }
 
-  /**
-   * Calcular gravedad según sentimiento e intención
-   */
+  
   private calcularGravedad(sentimiento: string, intencion: string): string {
     // Infracciones graves por defecto
     const infraccionesGraves = [
@@ -231,10 +219,7 @@ export class OLAPIntegrationService {
     return 'baja';
   }
 
-  /**
-   * Obtener recomendaciones basadas en historial
-   * Ejemplo: Si usuario tiene 3+ consultas sobre alcohol, sugerir curso prevención
-   */
+ 
   async obtenerRecomendacionesPersonalizadas(usuarioId: string): Promise<string[]> {
     try {
       const perfil = await this.obtenerPerfilUsuario(usuarioId);
@@ -260,6 +245,121 @@ export class OLAPIntegrationService {
       return recomendaciones;
     } catch (error) {
       return [];
+    }
+  }
+
+  
+  async registrarAceptacionProfesionista(params: {
+    usuarioId: string;
+    profesionistaId: string;
+    cluster: string;
+    tipoAccion: 'contacto' | 'contratacion';
+  }): Promise<void> {
+    try {
+      await axios.post(`${this.olapUrl}/tracking/profesionista/aceptacion`, {
+        usuarioId: params.usuarioId,
+        profesionistaId: params.profesionistaId,
+        cluster: params.cluster,
+        tipoAccion: params.tipoAccion,
+        fecha: new Date()
+      }, { timeout: 5000 });
+
+      console.log(` OLAP: Aceptación registrada - Profesionista ${params.profesionistaId.substring(0, 8)}`);
+    } catch (error: any) {
+      console.log(`  OLAP registro de aceptación falló:`, error.message);
+    }
+  }
+
+  
+  async registrarRechazoProfesionista(params: {
+    usuarioId: string;
+    profesionistaId: string;
+    cluster: string;
+    razon?: string;
+  }): Promise<void> {
+    try {
+      await axios.post(`${this.olapUrl}/tracking/profesionista/rechazo`, {
+        usuarioId: params.usuarioId,
+        profesionistaId: params.profesionistaId,
+        cluster: params.cluster,
+        razon: params.razon || 'No especificada',
+        fecha: new Date()
+      }, { timeout: 5000 });
+
+      console.log(`❌ OLAP: Rechazo registrado - Profesionista ${params.profesionistaId.substring(0, 8)}`);
+    } catch (error: any) {
+      console.log(`⚠️  OLAP registro de rechazo falló:`, error.message);
+    }
+  }
+
+  
+  async obtenerRechazosUsuario(usuarioId: string, profesionistaId: string): Promise<number> {
+    try {
+      const response = await axios.get(
+        `${this.olapUrl}/tracking/profesionista/${profesionistaId}/rechazos/${usuarioId}`,
+        { timeout: 3000 }
+      );
+      return response.data.totalRechazos || 0;
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  
+  async obtenerProfesionistasBloquados(usuarioId: string): Promise<string[]> {
+    try {
+      const response = await axios.get(
+        `${this.olapUrl}/tracking/usuario/${usuarioId}/profesionistas-bloqueados`,
+        { timeout: 3000 }
+      );
+      return response.data.bloqueados || [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  
+  async calificarProfesionista(params: {
+    usuarioId: string;
+    profesionistaId: string;
+    rating: number;
+    comentario?: string;
+  }): Promise<void> {
+    try {
+      await axios.post(`${this.olapUrl}/tracking/profesionista/rating`, params, { timeout: 3000 });
+      console.log(` Rating ${params.rating}/5 registrado para profesionista ${params.profesionistaId.substring(0, 8)}`);
+    } catch (error: any) {
+      console.error('  OLAP registro de rating falló:', error.message);
+      throw error;
+    }
+  }
+
+  
+  async obtenerRatingProfesionista(profesionistaId: string): Promise<{ promedio: number; total: number }> {
+    try {
+      const response = await axios.get(
+        `${this.olapUrl}/tracking/profesionista/${profesionistaId}/rating`,
+        { timeout: 3000 }
+      );
+      return response.data;
+    } catch (error) {
+      return { promedio: 0, total: 0 };
+    }
+  }
+
+  
+  async registrarInteraccion(params: {
+    usuarioId: string;
+    profesionistaId: string;
+    tipoInteraccion: string;
+    cluster?: string;
+  }): Promise<void> {
+    try {
+      await axios.post(`${this.olapUrl}/tracking/profesionista/interaccion`, params, { timeout: 3000 });
+      console.log(`✅ Interacción ${params.tipoInteraccion} registrada para profesionista ${params.profesionistaId.substring(0, 8)}`);
+    } catch (error: any) {
+      console.error('❌ OLAP registro de interacción falló:', error.message);
+      throw error;
     }
   }
 }

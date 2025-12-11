@@ -248,6 +248,11 @@ export class LegalNormalizer {
     const hasVelocidad = /velocidad|rápido|volando/i.test(textoNormalizado);
     const hasSemaforo = /semáforo|rojo|alto/i.test(textoNormalizado);
     const hasIntencional = /intencional|lancé|le di/i.test(textoNormalizado);
+    const hasVuelta = /vuelta|retorno|giro|dar la vuelta|dando vuelta/i.test(textoNormalizado);
+    const hasCarril = /carril|rebase|rebasar|adelantar/i.test(textoNormalizado);
+    const hasSentidoContrario = /sentido contrario|contraflujo|contra[-\s]?mano/i.test(textoNormalizado);
+    const hasCinturon = /cintur[oó]n|sin cintur[oó]n/i.test(textoNormalizado);
+    const hasDocumentos = /licencia|documentos|papeles|placas|verificaci[oó]n/i.test(textoNormalizado);
 
     const claves: string[] = [];
 
@@ -286,12 +291,52 @@ export class LegalNormalizer {
 
     if (hasVelocidad) {
       claves.push('exceso de velocidad');
-      claves.push('conducción temeraria');
+      claves.push('límites de velocidad');
+      claves.push('velocidad máxima permitida');
+      claves.push('medición de velocidad');
+      claves.push('radar');
+      claves.push('derechos del conductor');
+      claves.push('impugnación de infracciones');
+      claves.push('procedimiento de medición');
     }
 
     if (hasSemaforo) {
       claves.push('cruzar semáforo en rojo');
       claves.push('infracción grave');
+    }
+
+    if (hasVuelta) {
+      claves.push('vuelta en U');
+      claves.push('retorno prohibido');
+      claves.push('giro prohibido');
+      claves.push('maniobras de circulación');
+      claves.push('infracciones de tránsito');
+    }
+
+    if (hasCarril) {
+      claves.push('cambio de carril');
+      claves.push('rebasar incorrectamente');
+      claves.push('adelantamiento prohibido');
+      claves.push('invasión de carril');
+    }
+
+    if (hasSentidoContrario) {
+      claves.push('circular en sentido contrario');
+      claves.push('contraflujo');
+      claves.push('dirección prohibida');
+    }
+
+    if (hasCinturon) {
+      claves.push('cinturón de seguridad');
+      claves.push('equipamiento obligatorio');
+      claves.push('medidas de seguridad vehicular');
+    }
+
+    if (hasDocumentos) {
+      claves.push('documentación vehicular');
+      claves.push('licencia de conducir');
+      claves.push('tarjeta de circulación');
+      claves.push('verificación vehicular');
     }
 
     // Agregar contexto de urgencia y culpabilidad si está disponible

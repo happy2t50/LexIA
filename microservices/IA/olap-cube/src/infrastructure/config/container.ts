@@ -9,6 +9,7 @@ import { EjecutarConsultaOLAPUseCase } from '../../application/usecases/Ejecutar
 import { ObtenerDatasetUseCase } from '../../application/usecases/ObtenerDatasetUseCase';
 import { ActualizarClusterUseCase } from '../../application/usecases/ActualizarClusterUseCase';
 import { ConsultaController } from '../http/controllers/ConsultaController';
+import { TrackingController } from '../http/controllers/TrackingController';
 import { IConsultaRepository } from '../../domain/ports/IConsultaRepository';
 
 export class Container {
@@ -26,6 +27,7 @@ export class Container {
 
   // Controllers
   public readonly consultaController: ConsultaController;
+  public readonly trackingController: TrackingController;
 
   private constructor() {
     // Determinar si usar PostgreSQL o InMemory
@@ -70,6 +72,23 @@ export class Container {
       this.actualizarClusterUseCase,
       this.consultaRepository
     );
+
+    // Inicializar TrackingController (requiere pool directamente)
+    if (this.pool) {
+      this.trackingController = new TrackingController(this.pool);
+    } else {
+      // Para modo InMemory, usar pool dummy (no se usará en desarrollo)
+      const dummyPool = new Pool({
+        host: 'localhost',
+        port: 5432,
+        database: 'dummy',
+        user: 'dummy',
+        password: 'dummy',
+        max: 1
+      });
+      this.trackingController = new TrackingController(dummyPool);
+      console.log('⚠️ TrackingController en modo InMemory (sin funcionalidad real)');
+    }
   }
 
   public static getInstance(): Container {
