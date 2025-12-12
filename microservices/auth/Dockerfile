@@ -12,7 +12,7 @@ RUN npm install
 COPY . .
 
 # Compilar TypeScript si es necesario
-RUN npm run build || true
+RUN npm run build
 
 # Remover devDependencies
 RUN npm prune --production
