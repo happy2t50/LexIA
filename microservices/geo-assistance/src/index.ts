@@ -127,6 +127,59 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Encontrar dependencias cercanas
+// Endpoint GET para buscar dependencias cercanas
+app.get('/nearby', (req: Request, res: Response) => {
+  try {
+    const latitud = parseFloat(req.query.latitud as string);
+    const longitud = parseFloat(req.query.longitud as string);
+    const tipo = req.query.tipo as string | undefined;
+    const distancia_km = parseFloat(req.query.distancia_km as string) || 10;
+    const limit = parseInt(req.query.limit as string) || 10;
+
+    if (isNaN(latitud) || isNaN(longitud)) {
+      return res.status(400).json({ error: 'latitud y longitud son requeridos' });
+    }
+
+    const ubicacionUsuario: Coordenadas = { lat: latitud, lng: longitud };
+    const maxDistance = distancia_km * 1000; // Convertir a metros
+
+    // Filtrar por tipo si se especifica
+    let dependenciasFiltradas = tipo
+      ? dependencias.filter(d => d.tipo === tipo)
+      : dependencias;
+
+    // Calcular distancias
+    const dependenciasConDistancia = dependenciasFiltradas.map(dep => {
+      const distancia = getDistance(
+        { latitude: ubicacionUsuario.lat, longitude: ubicacionUsuario.lng },
+        { latitude: dep.coordenadas.lat, longitude: dep.coordenadas.lng }
+      );
+
+      return {
+        ...dep,
+        distancia,
+        distanciaKm: (distancia / 1000).toFixed(2)
+      };
+    });
+
+    // Filtrar por distancia máxima y ordenar
+    const resultados = dependenciasConDistancia
+      .filter(d => d.distancia <= maxDistance)
+      .sort((a, b) => a.distancia - b.distancia)
+      .slice(0, limit);
+
+    res.json({
+      ubicacion: ubicacionUsuario,
+      tipo: tipo || 'todas',
+      maxDistance,
+      totalResultados: resultados.length,
+      dependencias: resultados
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/nearby', (req: Request, res: Response) => {
   try {
     const { lat, lng, tipo, maxDistance = 5000 } = req.body;

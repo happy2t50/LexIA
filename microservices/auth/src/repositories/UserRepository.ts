@@ -20,6 +20,10 @@ export interface User {
     account_type: string;
     created_at: Date;
     updated_at: Date;
+    // Campos adicionales para admin
+    verificado?: boolean;
+    suspended?: boolean;
+    ultimo_acceso?: Date;
 }
 
 export interface CreateUserData {
@@ -231,6 +235,15 @@ export class UserRepository {
     }
 
     /**
+     * Obtener todos los usuarios activos (sin paginación)
+     */
+    async findAll(): Promise<User[]> {
+        const query = 'SELECT * FROM usuarios WHERE activo = true ORDER BY fecha_registro DESC';
+        const result: QueryResult<User> = await this.pool.query(query);
+        return result.rows;
+    }
+
+    /**
      * Listar usuarios con paginación
      */
     async list(page: number = 1, limit: number = 10): Promise<{ users: User[]; total: number }> {
@@ -243,7 +256,7 @@ export class UserRepository {
         const query = `
             SELECT * FROM usuarios
             WHERE activo = true
-            ORDER BY created_at DESC
+            ORDER BY fecha_registro DESC
             LIMIT $1 OFFSET $2
         `;
 

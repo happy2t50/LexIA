@@ -68,8 +68,8 @@ export class AuthService {
 
         const user = await UserRepository.create(userData);
 
-        // Crear token de verificación de email
-        const verificationToken = generateSecureToken();
+        // Crear código de verificación de 6 dígitos
+        const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = calculateExpiration(24); // 24 horas
 
         await EmailVerificationRepository.create({
@@ -98,6 +98,7 @@ export class AuthService {
                     subject: emailContent.subject,
                     html: emailContent.html
                 });
+                console.log(`📧 Código de verificación enviado a ${user.email}: ${verificationToken}`);
             } catch (error) {
                 console.error('Error al enviar email de verificación:', error);
             }
@@ -366,8 +367,8 @@ export class AuthService {
         // Invalidar tokens anteriores
         await EmailVerificationRepository.invalidateUserTokens(user.id);
 
-        // Crear nuevo token
-        const verificationToken = generateSecureToken();
+        // Crear código de verificación de 6 dígitos
+        const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
         const expiresAt = calculateExpiration(24);
 
         await EmailVerificationRepository.create({
@@ -386,11 +387,12 @@ export class AuthService {
                 subject: emailContent.subject,
                 html: emailContent.html
             });
+            console.log(`📧 Código de verificación reenviado a ${user.email}: ${verificationToken}`);
         }
     }
 
     /**
-     * Solicitar recuperación de contraseña
+     * Solicitar recuperación de contraseña - Genera código de 6 dígitos
      */
     async requestPasswordReset(email: string, ipAddress?: string): Promise<void> {
         const user = await UserRepository.findByEmail(email);
@@ -399,22 +401,25 @@ export class AuthService {
             return;
         }
 
-        // Verificar si ya hay un token reciente (anti-spam)
-        const hasRecentToken = await PasswordResetRepository.hasRecentToken(user.id, 5);
+        // Verificar si ya hay un código reciente (anti-spam)
+        const hasRecentToken = await PasswordResetRepository.hasRecentToken(user.id, 2);
         if (hasRecentToken) {
-            throw new Error('Ya se envió un email recientemente. Espera 5 minutos.');
+            throw new Error('Ya se envió un código recientemente. Espera 2 minutos.');
         }
 
-        // Invalidar tokens anteriores
+        // Invalidar códigos anteriores
         await PasswordResetRepository.invalidateUserTokens(user.id);
 
-        // Crear token de reset
-        const resetToken = generateSecureToken();
-        const expiresAt = calculateExpiration(1); // 1 hora
+        // Generar código de 6 dígitos
+        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // Calcular expiración (10 minutos)
+        const expiresAt = new Date();
+        expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
         await PasswordResetRepository.create({
             usuario_id: user.id,
-            token: resetToken,
+            token: code,
             expires_at: expiresAt,
             ip_address: ipAddress
         });
@@ -428,25 +433,56 @@ export class AuthService {
             ip_address: ipAddress
         });
 
-        // Enviar email
+        // Enviar email con el código
         if (process.env.SMTP_USER) {
-            const emailContent = emailTemplates.passwordReset(resetToken, user.nombre);
-            await transporter.sendMail({
-                from: process.env.SMTP_USER,
-                to: user.email,
-                subject: emailContent.subject,
-                html: emailContent.html
-            });
+            try {
+                const emailContent = emailTemplates.passwordReset(code, user.nombre);
+                await transporter.sendMail({
+                    from: process.env.SMTP_USER,
+                    to: user.email,
+                    subject: emailContent.subject,
+                    html: emailContent.html
+                });
+                console.log(`✉️  Código de recuperación enviado a ${email}: ${code}`);
+            } catch (error) {
+                console.error('Error al enviar email de recuperación:', error);
+                throw new Error('Error al enviar el email de recuperación');
+            }
+        } else {
+            // En desarrollo, mostrar el código en consola
+            console.log(`🔑 Código de recuperación para ${email}: ${code} (expira en 10 minutos)`);
         }
     }
 
     /**
-     * Resetear contraseña
+     * Verificar código de recuperación
      */
-    async resetPassword(token: string, newPassword: string): Promise<boolean> {
-        const resetToken = await PasswordResetRepository.findByToken(token);
-        if (!resetToken) {
-            throw new Error('Token de recuperación inválido o expirado');
+    async verifyResetCode(email: string, code: string): Promise<boolean> {
+        const user = await UserRepository.findByEmail(email);
+        if (!user) {
+            return false;
+        }
+
+        const resetToken = await PasswordResetRepository.findByToken(code);
+        if (!resetToken || resetToken.usuario_id !== user.id) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Resetear contraseña con código verificado
+     */
+    async resetPassword(email: string, code: string, newPassword: string): Promise<boolean> {
+        const user = await UserRepository.findByEmail(email);
+        if (!user) {
+            throw new Error('Usuario no encontrado');
+        }
+
+        const resetToken = await PasswordResetRepository.findByToken(code);
+        if (!resetToken || resetToken.usuario_id !== user.id) {
+            throw new Error('Código de recuperación inválido o expirado');
         }
 
         // Validar fortaleza de contraseña
@@ -459,25 +495,23 @@ export class AuthService {
         const password_hash = await hashPassword(newPassword);
 
         // Actualizar contraseña
-        await UserRepository.updatePassword(resetToken.usuario_id, password_hash);
+        await UserRepository.updatePassword(user.id, password_hash);
 
-        // Marcar token como usado
-        await PasswordResetRepository.markAsUsed(token);
+        // Marcar código como usado
+        await PasswordResetRepository.markAsUsed(code);
 
         // Revocar todas las sesiones (por seguridad)
-        await RefreshTokenRepository.revokeAllForUser(resetToken.usuario_id);
+        await RefreshTokenRepository.revokeAllForUser(user.id);
 
         // Log del evento
-        const user = await UserRepository.findById(resetToken.usuario_id);
-        if (user) {
-            await AuthLogRepository.create({
-                usuario_id: user.id,
-                email: user.email,
-                event_type: 'password_reset_completed',
-                success: true
-            });
-        }
+        await AuthLogRepository.create({
+            usuario_id: user.id,
+            email: user.email,
+            event_type: 'password_reset_completed',
+            success: true
+        });
 
+        console.log(`✅ Contraseña restablecida exitosamente para ${email}`);
         return true;
     }
 
@@ -554,6 +588,309 @@ export class AuthService {
      */
     async getAuthHistory(userId: number, limit: number = 50) {
         return await AuthLogRepository.findByUserId(userId, limit);
+    }
+
+    // =====================================================
+    // ADMIN METHODS
+    // =====================================================
+
+    /**
+     * Obtener estadísticas generales del sistema (solo admin)
+     */
+    async getAdminStats() {
+        try {
+            // Obtener conteo total de usuarios
+            const allUsers = await UserRepository.findAll();
+            const totalUsers = allUsers.length;
+            
+            // Contar usuarios por rol
+            const lawyers = allUsers.filter(u => u.rol === 'lawyer' || u.rol === 'abogado').length;
+            const regularUsers = allUsers.filter(u => u.rol === 'user').length;
+            
+            // Contar usuarios activos (última actividad en los últimos 30 días)
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const activeUsers = allUsers.filter(u => 
+                u.ultimo_acceso && new Date(u.ultimo_acceso) >= thirtyDaysAgo
+            ).length;
+
+            // Contar perfiles verificados
+            const verifiedLawyers = allUsers.filter(u => 
+                (u.rol === 'lawyer' || u.rol === 'abogado') && u.verificado
+            ).length;
+
+            // Calcular crecimiento (mock - en producción esto vendría de métricas históricas)
+            const crecimientoUsuarios = 12.5;
+            const crecimientoAbogados = 8.3;
+
+            return {
+                usuarios_activos: activeUsers,
+                abogados_verificados: verifiedLawyers,
+                anunciantes_activos: 0, // Por implementar
+                consultas_del_mes: 0, // Por implementar - requiere integración con servicio de chat
+                crecimiento_usuarios: crecimientoUsuarios,
+                crecimiento_abogados: crecimientoAbogados,
+                crecimiento_anunciantes: 0,
+                crecimiento_consultas: 0,
+                total_usuarios: totalUsers,
+                usuarios_regulares: regularUsers,
+                total_abogados: lawyers
+            };
+        } catch (error: any) {
+            console.error('Error al obtener estadísticas de admin:', error);
+            throw new Error('Error al obtener estadísticas del sistema');
+        }
+    }
+
+    /**
+     * Obtener lista de usuarios con paginación y filtros
+     */
+    async getUsers(options: {
+        page?: number;
+        limit?: number;
+        role?: string;
+        status?: string;
+    }) {
+        try {
+            const { page = 1, limit = 20, role, status } = options;
+            
+            let users = await UserRepository.findAll();
+
+            // Aplicar filtros
+            if (role) {
+                users = users.filter(u => u.rol === role);
+            }
+
+            if (status === 'active') {
+                users = users.filter(u => !u.suspended);
+            } else if (status === 'suspended') {
+                users = users.filter(u => u.suspended);
+            }
+
+            // Calcular paginación
+            const startIndex = (page - 1) * limit;
+            const endIndex = startIndex + limit;
+            const paginatedUsers = users.slice(startIndex, endIndex);
+
+            // Eliminar password_hash de los resultados
+            const sanitizedUsers = paginatedUsers.map(user => {
+                const { password_hash, ...userWithoutPassword } = user;
+                return userWithoutPassword;
+            });
+
+            return {
+                users: sanitizedUsers,
+                pagination: {
+                    page,
+                    limit,
+                    total: users.length,
+                    totalPages: Math.ceil(users.length / limit)
+                }
+            };
+        } catch (error: any) {
+            console.error('Error al obtener usuarios:', error);
+            throw new Error('Error al obtener lista de usuarios');
+        }
+    }
+
+    /**
+     * Obtener perfiles pendientes de validación
+     */
+    async getPendingProfiles() {
+        try {
+            const allUsers = await UserRepository.findAll();
+            
+            // Filtrar abogados no verificados
+            const pendingProfiles = allUsers
+                .filter(u => (u.rol === 'lawyer' || u.rol === 'abogado') && !u.verificado)
+                .map(user => {
+                    const { password_hash, ...userWithoutPassword } = user;
+                    return {
+                        id: user.id,
+                        nombre: user.nombre,
+                        apellido: user.apellido,
+                        email: user.email,
+                        telefono: user.telefono,
+                        fecha_registro: user.created_at,
+                        rol: user.rol,
+                        verificado: user.verificado,
+                        // Datos adicionales que vendrían del perfil de abogado
+                        cedula_profesional: null,
+                        especialidad: null,
+                        tipo: 'abogado'
+                    };
+                });
+
+            return pendingProfiles;
+        } catch (error: any) {
+            console.error('Error al obtener perfiles pendientes:', error);
+            throw new Error('Error al obtener perfiles pendientes');
+        }
+    }
+
+    /**
+     * Validar o rechazar perfil de abogado
+     */
+    async validateProfile(profileId: string, approved: boolean, motivo?: string) {
+        try {
+            const userId = parseInt(profileId, 10);
+            
+            if (isNaN(userId)) {
+                throw new Error('ID de perfil inválido');
+            }
+
+            const user = await UserRepository.findById(userId);
+            if (!user) {
+                throw new Error('Usuario no encontrado');
+            }
+
+            if (user.rol !== 'lawyer' && user.rol !== 'abogado') {
+                throw new Error('El usuario no es un abogado');
+            }
+
+            // Actualizar estado de verificación
+            const updatedUser = await UserRepository.update(userId, {
+                verificado: approved
+            });
+
+            // Enviar email de notificación
+            if (process.env.SMTP_USER && updatedUser) {
+                try {
+                    const subject = approved 
+                        ? 'Tu perfil ha sido aprobado - LexIA'
+                        : 'Actualización sobre tu perfil - LexIA';
+                    
+                    const message = approved
+                        ? `¡Felicidades ${user.nombre}! Tu perfil de abogado ha sido verificado y aprobado.`
+                        : `Hola ${user.nombre}, tu perfil requiere correcciones. ${motivo || ''}`;
+
+                    await transporter.sendMail({
+                        from: process.env.SMTP_USER,
+                        to: user.email,
+                        subject,
+                        html: `<p>${message}</p>`
+                    });
+                } catch (emailError) {
+                    console.error('Error al enviar email de validación:', emailError);
+                }
+            }
+
+            return {
+                success: true,
+                profileId: userId,
+                approved,
+                verificado: approved
+            };
+        } catch (error: any) {
+            console.error('Error al validar perfil:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Suspender o reactivar cuenta de usuario
+     */
+    async suspendUser(userId: string, suspended: boolean, motivo?: string) {
+        try {
+            const userIdNum = parseInt(userId, 10);
+            
+            if (isNaN(userIdNum)) {
+                throw new Error('ID de usuario inválido');
+            }
+
+            const user = await UserRepository.findById(userIdNum);
+            if (!user) {
+                throw new Error('Usuario no encontrado');
+            }
+
+            // Actualizar estado de suspensión
+            const updatedUser = await UserRepository.update(userIdNum, {
+                suspended
+            });
+
+            // Enviar email de notificación
+            if (process.env.SMTP_USER && updatedUser) {
+                try {
+                    const subject = suspended 
+                        ? 'Tu cuenta ha sido suspendida - LexIA'
+                        : 'Tu cuenta ha sido reactivada - LexIA';
+                    
+                    const message = suspended
+                        ? `Hola ${user.nombre}, tu cuenta ha sido suspendida. ${motivo || ''}`
+                        : `Hola ${user.nombre}, tu cuenta ha sido reactivada. Puedes continuar usando LexIA.`;
+
+                    await transporter.sendMail({
+                        from: process.env.SMTP_USER,
+                        to: user.email,
+                        subject,
+                        html: `<p>${message}</p>`
+                    });
+                } catch (emailError) {
+                    console.error('Error al enviar email de suspensión:', emailError);
+                }
+            }
+
+            return {
+                success: true,
+                userId: userIdNum,
+                suspended
+            };
+        } catch (error: any) {
+            console.error('Error al suspender/reactivar usuario:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Obtener detalles completos de un usuario
+     */
+    async getUserDetails(userId: string) {
+        try {
+            const userIdNum = parseInt(userId, 10);
+            
+            if (isNaN(userIdNum)) {
+                throw new Error('ID de usuario inválido');
+            }
+
+            const user = await UserRepository.findById(userIdNum);
+            if (!user) {
+                throw new Error('Usuario no encontrado');
+            }
+
+            // Obtener sesiones activas
+            const sessions = await this.getActiveSessions(userIdNum);
+            
+            // Obtener historial de autenticación (últimos 10 registros)
+            const authHistory = await this.getAuthHistory(userIdNum, 10);
+
+            // Eliminar password_hash
+            const { password_hash, ...userWithoutPassword } = user;
+
+            return {
+                user: userWithoutPassword,
+                sessions,
+                authHistory,
+                statistics: {
+                    totalSessions: sessions.length,
+                    lastLogin: user.ultimo_acceso,
+                    accountAge: this.calculateAccountAge(user.created_at)
+                }
+            };
+        } catch (error: any) {
+            console.error('Error al obtener detalles de usuario:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calcular edad de la cuenta en días
+     */
+    private calculateAccountAge(createdAt: Date): number {
+        const now = new Date();
+        const created = new Date(createdAt);
+        const diffTime = Math.abs(now.getTime() - created.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays;
     }
 }
 

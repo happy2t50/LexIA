@@ -312,10 +312,23 @@ export class ConversationService {
   private async ensureUserExists(usuarioId: string, nombre?: string): Promise<void> {
     const exists = await this.pool.query(`SELECT 1 FROM usuarios WHERE id = $1 LIMIT 1`, [usuarioId]);
     if (exists.rows.length > 0) return;
-    // Insertar registro mínimo; otras columnas deben tener DEFAULT o permitir NULL
+    
+    // Generar email único basado en usuarioId + timestamp para evitar colisiones
+    const timestamp = Date.now();
+    const testEmail = `test-${usuarioId.substring(0, 8)}-${timestamp}@lexia.test`;
+    
+    // Separar nombre y apellido si viene con espacio, o usar 'Test' como apellido default
+    const nombreParts = (nombre || 'Usuario Test').split(' ');
+    const primerNombre = nombreParts[0];
+    const apellido = nombreParts.slice(1).join(' ') || 'Test';
+    
     await this.pool.query(
-      `INSERT INTO usuarios (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
-      [usuarioId, nombre || 'Usuario']
-    );
+      `INSERT INTO usuarios (id, nombre, apellido, email) VALUES ($1, $2, $3, $4) 
+       ON CONFLICT (id) DO NOTHING`,
+      [usuarioId, primerNombre, apellido, testEmail]
+    ).catch(err => {
+      // Si falla por email duplicado u otro constraint, ignorar silenciosamente
+      if (err.code !== '23505') throw err; // 23505 = unique_violation
+    });
   }
 }

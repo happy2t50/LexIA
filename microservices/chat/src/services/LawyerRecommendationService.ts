@@ -6,24 +6,36 @@ export class LawyerRecommendationService {
   constructor(private pool: Pool) {}
 
   /**
-   * Recomendar abogados basado en cluster
+   * Recomendar abogados basado en cluster (filtrado bloqueados)
    */
   async recommendLawyers(
     cluster: string,
     usuarioId: string,
     ciudad?: string,
-    limit: number = 10
+    limit: number = 10,
+    profesionistasBloqueados: string[] = []
   ): Promise<LawyerRecommendation[]> {
-    // Mapeo de clusters a especialidades
+    // Mapeo de clusters a especialidades (case-sensitive match con DB)
     const clusterToEspecialidad: Record<string, string> = {
-      C1: 'Infracciones de Tránsito',
+      C1: 'Infracciones de tránsito',
       C2: 'Estacionamiento',
       C3: 'Alcoholemia',
       C4: 'Documentación',
-      C5: 'Accidentes de Tránsito'
+      C5: 'Accidentes de tránsito'
     };
 
     const especialidad = clusterToEspecialidad[cluster] || 'Tránsito';
+
+    // Parámetros base: $1=cluster, $2=especialidad, [$3=ciudad opcional]
+    let paramIndex = ciudad ? 3 : 2;
+    
+    // Construir filtro de bloqueados dinámicamente
+    const bloqueadosFilter = profesionistasBloqueados.length > 0
+      ? `AND u.id NOT IN (${profesionistasBloqueados.map((_, i) => `$${paramIndex + 1 + i}`).join(', ')})`
+      : '';
+    
+    // Calcular índice del LIMIT
+    const limitIndex = paramIndex + 1 + profesionistasBloqueados.length;
 
     // Consulta con scoring personalizado
     const query = `
@@ -36,7 +48,7 @@ export class LawyerRecommendationService {
         a.experiencia_anios,
         a.descripcion,
         a.despacho_direccion,
-        u.rating_promedio as rating,
+        a.rating_promedio as rating,
         COALESCE(rs.score_ajustado, 0.5) as score_personalizado,
         COALESCE(rs.total_casos_exitosos, 0) as casos_ganados
       FROM usuarios u
@@ -50,16 +62,17 @@ export class LawyerRecommendationService {
         AND a.disponible = true
         AND $2 = ANY(a.especialidades)
         ${ciudad ? 'AND a.ciudad = $3' : ''}
+        ${bloqueadosFilter}
       ORDER BY
         score_personalizado DESC,
-        u.rating_promedio DESC,
+        a.rating_promedio DESC,
         a.experiencia_anios DESC
-      LIMIT $${ciudad ? '4' : '3'}
+      LIMIT $${limitIndex}
     `;
 
     const params = ciudad
-      ? [cluster, especialidad, ciudad, limit]
-      : [cluster, especialidad, limit];
+      ? [cluster, especialidad, ciudad, ...profesionistasBloqueados, limit]
+      : [cluster, especialidad, ...profesionistasBloqueados, limit];
 
     const result = await this.pool.query(query, params);
 

@@ -26,7 +26,7 @@ export class ClusteringService {
         id: 'C1',
         nombre: 'Exceso de velocidad / Semáforo',
         descripcion: 'Infracciones relacionadas con exceso de velocidad y violación de semáforos',
-        palabrasClave: ['semaforo', 'rojo', 'velocidad', 'rapido', 'pasarse', 'cruzar'],
+        palabrasClave: ['semaforo', 'rojo', 'velocidad', 'rapido', 'pasarse', 'cruzar', 'alto', 'luz'],
         ejemplos: [
           'me pasé un semáforo en rojo',
           'iba con exceso de velocidad',
@@ -37,7 +37,7 @@ export class ClusteringService {
         id: 'C2',
         nombre: 'Estacionamiento indebido',
         descripcion: 'Problemas relacionados con estacionamiento no permitido',
-        palabrasClave: ['estacionamiento', 'parqueo', 'estacionar', 'zona', 'prohibido', 'grua'],
+        palabrasClave: ['estacionamiento', 'parqueo', 'estacionar', 'zona', 'prohibido', 'grua', 'corralon'],
         ejemplos: [
           'estaba estacionado mal',
           'me remolcaron el carro',
@@ -48,7 +48,7 @@ export class ClusteringService {
         id: 'C3',
         nombre: 'Alcoholímetro',
         descripcion: 'Controles de alcoholemia y sustancias',
-        palabrasClave: ['alcoholimetro', 'alcohol', 'ebrio', 'tomar', 'cerveza', 'control'],
+        palabrasClave: ['alcoholimetro', 'alcohol', 'ebrio', 'tomar', 'cerveza', 'control', 'borracho', 'copas'],
         ejemplos: [
           'me paró el alcoholímetro',
           'había tomado y me detuvieron',
@@ -57,24 +57,51 @@ export class ClusteringService {
       },
       {
         id: 'C4',
-        nombre: 'Falta de documentos',
-        descripcion: 'Ausencia de documentación requerida',
-        palabrasClave: ['licencia', 'documentos', 'soat', 'seguro', 'papeles', 'matricula'],
+        nombre: 'Falta de documentos / Equipamiento',
+        descripcion: 'Ausencia de documentación o equipamiento obligatorio del vehículo',
+        palabrasClave: ['licencia', 'documentos', 'soat', 'seguro', 'papeles', 'matricula', 'tarjeta', 'circulacion',
+                        'cinturon', 'seguridad', 'llanta', 'luces', 'placas', 'verificacion', 'engomado'],
         ejemplos: [
           'no traía licencia',
           'se me olvidó el SOAT',
-          'me multaron por no tener papeles'
+          'me multaron por no tener papeles',
+          'no traía cinturón de seguridad'
         ]
       },
       {
         id: 'C5',
         nombre: 'Accidentes',
         descripcion: 'Colisiones y accidentes de tránsito',
-        palabrasClave: ['choque', 'accidente', 'colision', 'estrellarse', 'golpear', 'dano'],
+        palabrasClave: ['choque', 'accidente', 'colision', 'estrellarse', 'golpear', 'dano', 'chocar', 'impacto', 'fuga'],
         ejemplos: [
           'choqué con otro carro',
           'tuve un accidente',
           'me estrellé contra un poste'
+        ]
+      },
+      {
+        id: 'C6',
+        nombre: 'Infracciones de circulación',
+        descripcion: 'Violaciones a las normas de circulación: vuelta en U, retornos, uso de carril, adelantamientos',
+        palabrasClave: ['vuelta', 'retorno', 'carril', 'adelantar', 'rebase', 'contraflujo', 'sentido', 'prohibido',
+                        'avenida', 'calle', 'via', 'doble', 'linea', 'amarilla', 'continua', 'reversa', 'circular'],
+        ejemplos: [
+          'di vuelta en U donde estaba prohibido',
+          'me agarraron dando la vuelta',
+          'me pasé de carril indebidamente'
+        ]
+      },
+      {
+        id: 'off_topic',
+        nombre: 'Fuera de tema',
+        descripcion: 'Consultas que no están relacionadas con tránsito o leyes vehiculares',
+        palabrasClave: ['receta', 'comida', 'cocinar', 'pastel', 'pizza', 'clima', 'tiempo', 'temperatura', 
+                        'divorcio', 'familia', 'matrimonio', 'hijos', 'salud', 'medico', 'enfermedad',
+                        'trabajo', 'empleo', 'laboral', 'renta', 'casa', 'propiedad', 'inmueble'],
+        ejemplos: [
+          'cómo preparar un pastel',
+          'qué clima va a hacer',
+          'quiero divorciarme'
         ]
       }
     ];
@@ -163,6 +190,7 @@ export class ClusteringService {
 
     const scores: Map<string, number> = new Map();
 
+    // Calcular scores para cada cluster
     this.clusters.forEach(cluster => {
       let score = 0;
       cluster.palabrasClave.forEach(palabra => {
@@ -177,17 +205,57 @@ export class ClusteringService {
       .sort((a, b) => b[1] - a[1]);
 
     const totalScore = sortedScores.reduce((sum, [, score]) => sum + score, 0);
-
     const mejorCluster = sortedScores[0];
-    const confianza = totalScore > 0 ? mejorCluster[1] / totalScore : 0.2;
+    
+    // Separar scores de tránsito vs off_topic
+    const transitScores = sortedScores.filter(([id]) => id !== 'off_topic');
+    const maxTransitScore = transitScores.length > 0 ? transitScores[0][1] : 0;
+    const offTopicScore = scores.get('off_topic') || 0;
+
+    let clusterFinal: string;
+    let confianzaFinal: number;
+
+    // PRIORIDAD 1: Si hay coincidencias claras con off_topic Y no hay coincidencias con tránsito
+    if (offTopicScore > 0 && maxTransitScore === 0) {
+      clusterFinal = 'off_topic';
+      confianzaFinal = 0.85; // Muy alta confianza en off-topic
+      console.log(`[CLUSTERING] 🚫 OFF-TOPIC detectado: offTopicScore=${offTopicScore}, transitScore=${maxTransitScore}`);
+    }
+    // PRIORIDAD 2: Si off_topic tiene más coincidencias que cualquier cluster de tránsito
+    else if (offTopicScore > maxTransitScore && offTopicScore > 0) {
+      clusterFinal = 'off_topic';
+      confianzaFinal = 0.80; // Alta confianza
+      console.log(`[CLUSTERING] 🚫 OFF-TOPIC gana: offTopicScore=${offTopicScore} > transitScore=${maxTransitScore}`);
+    }
+    // PRIORIDAD 3: Si NO hay coincidencias con ningún cluster
+    else if (totalScore === 0) {
+      clusterFinal = 'off_topic';
+      confianzaFinal = 0.65; // Moderada confianza - probablemente off-topic
+      console.log(`[CLUSTERING] 🚫 Sin coincidencias -> OFF-TOPIC por defecto`);
+    }
+    // PRIORIDAD 4: Hay coincidencias con tránsito pero son débiles (1-2 palabras) y hay palabras sospechosas
+    else if (maxTransitScore > 0 && maxTransitScore <= 2 && this.esSospechoso(textoNormalizado)) {
+      clusterFinal = 'off_topic';
+      confianzaFinal = 0.70; // Alta confianza - probablemente off-topic
+      console.log(`[CLUSTERING] 🚫 Coincidencias débiles + texto sospechoso -> OFF-TOPIC`);
+    }
+    // CASO NORMAL: Hay buenas coincidencias con clusters de tránsito
+    else {
+      clusterFinal = mejorCluster[0];
+      confianzaFinal = totalScore > 0 ? (mejorCluster[1] / totalScore) * 100 : 20;
+      console.log(`[CLUSTERING] ✅ Clasificado como ${clusterFinal}: score=${mejorCluster[1]}, confianza=${confianzaFinal.toFixed(1)}%`);
+    }
 
     return {
-      cluster: mejorCluster[0],
-      confianza,
-      alternativas: sortedScores.slice(1, 3).map(([cluster, score]) => ({
-        cluster,
-        confianza: totalScore > 0 ? score / totalScore : 0.1
-      }))
+      cluster: clusterFinal,
+      confianza: confianzaFinal,
+      alternativas: sortedScores
+        .filter(([id]) => id !== clusterFinal)
+        .slice(0, 2)
+        .map(([cluster, score]) => ({
+          cluster,
+          confianza: totalScore > 0 ? (score / totalScore) * 100 : 10
+        }))
     };
   }
 
@@ -216,6 +284,39 @@ export class ClusteringService {
   private calcularSilhouetteScore(trainingData: TrainingData[]): number {
     // Simulación - en producción se calcularía el score real
     return 0.72;
+  }
+
+  
+  private esSospechoso(textoNormalizado: string): boolean {
+    const palabrasSospechosas = [
+      // Comida y cocina
+      'receta', 'cocinar', 'hornear', 'ingredientes', 'sarten', 'horno', 'comida', 'platillo',
+      'desayuno', 'almuerzo', 'cena', 'postre', 'pastel', 'pizza', 'taco', 'torta',
+      // Clima y naturaleza
+      'clima', 'tiempo', 'temperatura', 'lluvia', 'sol', 'nublado', 'calor', 'frio',
+      // Derecho familiar
+      'divorcio', 'matrimonio', 'esposo', 'esposa', 'pareja', 'hijos', 'pension', 'custodia', 'separacion',
+      // Derecho laboral
+      'trabajo', 'empleo', 'jefe', 'empresa', 'salario', 'sueldo', 'despido', 'finiquito', 'sindicato',
+      // Inmobiliario
+      'casa', 'departamento', 'renta', 'alquiler', 'inquilino', 'casero', 'arrendador', 'inmueble',
+      // Salud
+      'medico', 'doctor', 'enfermedad', 'hospital', 'clinica', 'medicamento', 'tratamiento',
+      // Tecnología no vehicular
+      'celular', 'telefono', 'computadora', 'internet', 'wifi', 'app', 'software',
+      // Educación
+      'escuela', 'universidad', 'maestro', 'profesor', 'clase', 'examen', 'tarea',
+      // Finanzas no relacionadas con multas
+      'prestamo', 'credito', 'banco', 'cuenta', 'tarjeta de credito', 'inversion'
+    ];
+
+    for (const palabra of palabrasSospechosas) {
+      if (textoNormalizado.includes(palabra)) {
+        console.log(`[CLUSTERING] ⚠️ Palabra sospechosa detectada: "${palabra}"`);
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

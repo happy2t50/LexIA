@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
+import adminRoutes from './routes/adminRoutes';
 import OAuthService from './services/OAuthService';
 import securityHeaders, { forceHTTPS } from './middleware/securityHeaders';
 import { requestLogger } from './middleware/sanitizeLogs';
@@ -95,6 +96,9 @@ app.get('/health', (req: Request, res: Response) => {
 
 // Rutas de autenticación
 app.use('/', authRoutes);
+
+// Rutas de administración
+app.use('/admin', adminRoutes);
 
 // =====================================================
 // MANEJO DE ERRORES

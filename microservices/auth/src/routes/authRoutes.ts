@@ -63,14 +63,21 @@ router.post('/resend-verification', AuthController.resendVerification);
 
 /**
  * @route POST /api/auth/forgot-password
- * @desc Solicitar recuperación de contraseña
+ * @desc Solicitar recuperación de contraseña - envía código de 6 dígitos
  * @access Public
  */
 router.post('/forgot-password', requestPasswordResetValidation, AuthController.forgotPassword);
 
 /**
+ * @route POST /api/auth/verify-reset-code
+ * @desc Verificar código de recuperación
+ * @access Public
+ */
+router.post('/verify-reset-code', AuthController.verifyResetCode);
+
+/**
  * @route POST /api/auth/reset-password
- * @desc Resetear contraseña con token
+ * @desc Resetear contraseña con código verificado
  * @access Public
  */
 router.post('/reset-password', passwordResetValidation, AuthController.resetPassword);
@@ -212,6 +219,68 @@ router.post('/2fa/regenerate-backup-codes', authenticate, TwoFactorController.re
  * @access Private
  */
 router.get('/2fa/status', authenticate, TwoFactorController.getStatus);
+
+// =====================================================
+// ADMIN ROUTES (requieren rol de administrador)
+// =====================================================
+
+import AdminController from '../controllers/AdminController';
+
+/**
+ * @route GET /api/auth/admin/stats
+ * @desc Obtener estadísticas del sistema
+ * @access Private (Admin only)
+ */
+router.get('/admin/stats', authenticate, AdminController.getAdminStats);
+
+/**
+ * @route GET /api/auth/admin/users
+ * @desc Obtener lista de usuarios
+ * @access Private (Admin only)
+ */
+router.get('/admin/users', authenticate, AdminController.getUsers);
+
+/**
+ * @route GET /api/auth/admin/users/:userId
+ * @desc Obtener detalles de un usuario
+ * @access Private (Admin only)
+ */
+router.get('/admin/users/:userId', authenticate, AdminController.getUserDetails);
+
+/**
+ * @route GET /api/auth/admin/pending-profiles
+ * @desc Obtener perfiles pendientes de validación
+ * @access Private (Admin only)
+ */
+router.get('/admin/pending-profiles', authenticate, AdminController.getPendingProfiles);
+
+/**
+ * @route POST /api/auth/admin/validate-profile
+ * @desc Validar o rechazar perfil de abogado
+ * @access Private (Admin only)
+ */
+router.post('/admin/validate-profile', authenticate, AdminController.validateProfile);
+
+/**
+ * @route POST /api/auth/admin/suspend-user
+ * @desc Suspender o reactivar cuenta de usuario
+ * @access Private (Admin only)
+ */
+router.post('/admin/suspend-user', authenticate, AdminController.suspendUser);
+
+/**
+ * @route GET /api/auth/admin/pending-reports
+ * @desc Obtener reportes pendientes de moderación
+ * @access Private (Admin only)
+ */
+router.get('/admin/pending-reports', authenticate, AdminController.getPendingReports);
+
+/**
+ * @route POST /api/auth/admin/moderate-content
+ * @desc Moderar contenido reportado
+ * @access Private (Admin only)
+ */
+router.post('/admin/moderate-content', authenticate, AdminController.moderateContent);
 
 // =====================================================
 // HEALTH CHECK

@@ -11,7 +11,7 @@ export interface EmailConfig {
 }
 
 // Configuración de Nodemailer
-const emailConfig: EmailConfig = {
+const emailConfig: EmailConfig & { logger?: boolean; debug?: boolean } = {
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true', // true para puerto 465, false para otros
@@ -19,6 +19,8 @@ const emailConfig: EmailConfig = {
         user: process.env.SMTP_USER || '',
         pass: process.env.SMTP_PASSWORD || '',
     },
+    logger: true,
+    debug: true,
 };
 
 export const transporter = nodemailer.createTransport(emailConfig);
@@ -39,51 +41,43 @@ if (emailConfig.auth.user && emailConfig.auth.pass) {
 // Templates de email
 export const emailTemplates = {
     verification: (token: string, nombre: string) => ({
-        subject: 'Verifica tu cuenta - LexIA',
+        subject: 'Código de Verificación - LexIA',
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #2563eb;">¡Bienvenido a LexIA, ${nombre}!</h2>
-                <p>Gracias por registrarte. Para completar tu registro, por favor verifica tu correo electrónico.</p>
+                <p>Gracias por registrarte. Para completar tu registro, usa el siguiente código de 6 dígitos:</p>
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}"
-                       style="background-color: #2563eb; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                        Verificar Email
-                    </a>
+                    <div style="background-color: #f3f4f6; padding: 20px; border-radius: 10px; display: inline-block;">
+                        <span style="font-size: 32px; font-weight: bold; color: #2563eb; letter-spacing: 8px;">${token}</span>
+                    </div>
                 </div>
                 <p style="color: #666; font-size: 14px;">
-                    O copia y pega este enlace en tu navegador:<br>
-                    <a href="${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}">
-                        ${process.env.API_URL || 'http://localhost'}/api/auth/verify-email?token=${token}
-                    </a>
+                    Ingresa este código en la aplicación para verificar tu cuenta.
                 </p>
                 <p style="color: #666; font-size: 12px; margin-top: 30px;">
-                    Este enlace expira en 24 horas. Si no solicitaste esta verificación, ignora este correo.
+                    Este código expira en 24 horas. Si no solicitaste esta verificación, ignora este correo.
                 </p>
             </div>
         `
     }),
 
-    passwordReset: (token: string, nombre: string) => ({
-        subject: 'Recuperación de Contraseña - LexIA',
+    passwordReset: (code: string, nombre: string) => ({
+        subject: 'Código de Recuperación de Contraseña - LexIA',
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                 <h2 style="color: #dc2626;">Recuperación de Contraseña</h2>
                 <p>Hola ${nombre},</p>
-                <p>Recibimos una solicitud para restablecer tu contraseña. Haz clic en el botón de abajo para continuar:</p>
+                <p>Recibimos una solicitud para restablecer tu contraseña. Usa el siguiente código de 6 dígitos:</p>
                 <div style="text-align: center; margin: 30px 0;">
-                    <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}"
-                       style="background-color: #dc2626; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                        Restablecer Contraseña
-                    </a>
+                    <div style="background-color: #f3f4f6; padding: 20px; border-radius: 10px; display: inline-block;">
+                        <span style="font-size: 32px; font-weight: bold; color: #dc2626; letter-spacing: 8px;">${code}</span>
+                    </div>
                 </div>
                 <p style="color: #666; font-size: 14px;">
-                    O copia y pega este enlace en tu navegador:<br>
-                    <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}">
-                        ${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}
-                    </a>
+                    Ingresa este código en la aplicación para continuar con el restablecimiento de tu contraseña.
                 </p>
                 <p style="color: #666; font-size: 12px; margin-top: 30px;">
-                    Este enlace expira en 1 hora. Si no solicitaste este cambio, ignora este correo y tu contraseña permanecerá igual.
+                    Este código expira en 10 minutos. Si no solicitaste este cambio, ignora este correo y tu contraseña permanecerá igual.
                 </p>
             </div>
         `
